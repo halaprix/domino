@@ -2,6 +2,7 @@
   "name": "@halaprix/multistep-multicall",
   "version": "0.1.0",
   "private": false,
+  "files": ["dist", "README.md", "LICENSE"],
   "type": "module",
   "description": "Batched on-chain data resolution for sequential, state-dependent reads. FSM executor for Multicall3 — reduces N×M RPC calls to M multicalls.",
   "license": "MIT",
