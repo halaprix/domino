@@ -23,9 +23,12 @@ function createViemExecutor(client: PublicClient): StepExecutor {
       const results = await client.multicall({
         contracts: contracts as Parameters<typeof client.multicall>[0]['contracts'],
         allowFailure: true,
-        // Pass the canonical Multicall3 address explicitly so the engine works
-        // even when the client has no chain (or a chain without multicall3) configured.
-        multicallAddress: MULTICALL3_ADDRESS,
+        // Prefer the chain's own Multicall3 address (covers custom/non-canonical
+        // deployments). Only fall back to the canonical address when the client
+        // has no chain — or a chain without multicall3 — configured.
+        ...(client.chain?.contracts?.multicall3
+          ? {}
+          : { multicallAddress: MULTICALL3_ADDRESS }),
       })
 
       return results.map((r) => {
