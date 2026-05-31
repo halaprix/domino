@@ -24,6 +24,12 @@ export interface ResolverEngine {
   }): Promise<Erc4626VaultResolution[]>
 }
 
+function normalizeEthersV5Value(value: unknown): unknown {
+  if (BigNumber.isBigNumber(value)) return value.toBigInt()
+  if (Array.isArray(value)) return value.map(normalizeEthersV5Value)
+  return value
+}
+
 function createEthersV5Executor(mc3: Contract, iface: utils.Interface): StepExecutor {
   return {
     async executeMulticall(calls: StepCall[]): Promise<RawResult[]> {
@@ -44,9 +50,10 @@ function createEthersV5Executor(mc3: Contract, iface: utils.Interface): StepExec
         if (!call) return { status: 'failure' as const }
         try {
           const decoded = iface.decodeFunctionResult(call.functionName, r.returnData)
-          let value = Array.isArray(decoded) ? decoded[0] : decoded
-          // Normalize ethers v5 BigNumber → bigint so handlers see uniform primitives
-          if (BigNumber.isBigNumber(value)) value = value.toBigInt()
+          // ethers returns a Result (extends Array), so check length not isArray
+          let value = decoded.length === 1 ? decoded[0] : decoded
+          // Normalize BigNumber → bigint (recursively for multi-return tuples)
+          value = normalizeEthersV5Value(value)
           return { status: 'success' as const, value }
         } catch {
           return { status: 'failure' as const }

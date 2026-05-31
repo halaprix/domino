@@ -59,19 +59,18 @@ export async function runMultistepTasks<TResult>(
       )
     }
 
-    // Group results by task (both successes and failures)
-    const perTaskResults = new Map<number, StepResult[]>()
+    // Pre-allocate a 2D array indexed by taskIndex for O(1) result grouping.
+    // Avoids Map hashing overhead — taskIndex is sequential zero-based, so
+    // array indexing is both faster and simpler.
+    const perTaskResults: StepResult[][] = Array.from({ length: tasks.length }, () => [])
+
     for (let i = 0; i < results.length; i++) {
       const entry = mapping[i]
       if (!entry) continue
       const { taskIndex, key } = entry
       const result = results[i] as RawResult
 
-      let list = perTaskResults.get(taskIndex)
-      if (!list) {
-        list = []
-        perTaskResults.set(taskIndex, list)
-      }
+      const list = perTaskResults[taskIndex]!
       if (result.status === 'success') {
         list.push({ key, value: result.value })
       } else {
@@ -80,12 +79,10 @@ export async function runMultistepTasks<TResult>(
     }
 
     // Dispatch results to all tasks active at this step.
-    // Iterate over ALL tasks (not perTaskResults entries) so tasks whose
-    // calls all failed still get notified with an empty results array.
     for (let i = 0; i < tasks.length; i++) {
       const task = tasks[i]
       if (task && step <= task.maxStep) {
-        task.consumeStepResults(step, perTaskResults.get(i) ?? [])
+        task.consumeStepResults(step, perTaskResults[i]!)
       }
     }
   }

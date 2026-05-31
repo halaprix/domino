@@ -45,7 +45,8 @@ function createEthersV6Executor(mc3: ContractCls, iface: InterfaceCls): StepExec
         if (!call) return { status: 'failure' as const }
         try {
           const decoded = iface.decodeFunctionResult(call.functionName, r.returnData)
-          const value = Array.isArray(decoded) ? decoded[0] : decoded
+          // ethers returns a Result (extends Array), so check length not isArray
+          const value = decoded.length === 1 ? decoded[0] : decoded
           return { status: 'success' as const, value }
         } catch {
           return { status: 'failure' as const }
