@@ -3,8 +3,8 @@
  * This file exists separately to break circular import cycles with the handlers.
  */
 
-import type { PublicClient } from "viem";
-import type { StepCall, StepExecutor, RawResult } from "../core/types";
+import type { PublicClient } from 'viem'
+import type { StepCall, StepExecutor, RawResult } from '../core/types'
 
 export class ViemExecutor implements StepExecutor {
   constructor(private client: PublicClient) {}
@@ -15,18 +15,18 @@ export class ViemExecutor implements StepExecutor {
       abi: call.abi,
       functionName: call.functionName,
       args: call.args ?? ([] as readonly unknown[]),
-    }));
+    }))
 
     const results = await this.client.multicall({
       contracts,
       allowFailure: true,
-    });
+    })
 
     return results.map((result) => {
-      if (result.status === "failure") {
-        return { status: "failure" as const };
+      if (result.status === 'failure') {
+        return { status: 'failure' as const }
       }
-      return { status: "success" as const, value: result.result };
-    });
+      return { status: 'success' as const, value: result.result }
+    })
   }
 }

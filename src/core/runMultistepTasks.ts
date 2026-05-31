@@ -13,13 +13,7 @@
  * (vs O(N) sequential calls for naive approach)
  */
 
-import type {
-  MultistepTask,
-  StepCall,
-  StepResult,
-  StepExecutor,
-  RawResult,
-} from "./types";
+import type { MultistepTask, StepCall, StepResult, StepExecutor, RawResult } from './types'
 
 /**
  * Execute multiple MultistepTasks against a single StepExecutor.
@@ -32,61 +26,58 @@ export async function runMultistepTasks<TResult>(
   executor: StepExecutor,
   tasks: MultistepTask<TResult>[],
 ): Promise<TResult[]> {
-  if (tasks.length === 0) return [];
+  if (tasks.length === 0) return []
 
-  const maxStep = tasks.reduce(
-    (max, task) => (task.maxStep > max ? task.maxStep : max),
-    0,
-  );
+  const maxStep = tasks.reduce((max, task) => (task.maxStep > max ? task.maxStep : max), 0)
 
   for (let step = 1; step <= maxStep; step++) {
-    const calls: StepCall[] = [];
-    const mapping: { taskIndex: number; key: string }[] = [];
+    const calls: StepCall[] = []
+    const mapping: { taskIndex: number; key: string }[] = []
 
     for (let taskIndex = 0; taskIndex < tasks.length; taskIndex++) {
-      const task = tasks[taskIndex]!;
-      if (step > task.maxStep) continue;
+      const task = tasks[taskIndex]!
+      if (step > task.maxStep) continue
 
-      const stepCalls = task.buildStepCalls(step);
+      const stepCalls = task.buildStepCalls(step)
       for (const call of stepCalls) {
-        calls.push(call);
-        mapping.push({ taskIndex, key: call.key });
+        calls.push(call)
+        mapping.push({ taskIndex, key: call.key })
       }
     }
 
     if (calls.length === 0) {
-      continue;
+      continue
     }
 
-    const results = await executor.executeMulticall(calls);
+    const results = await executor.executeMulticall(calls)
 
     // Group results by task
-    const perTaskResults = new Map<number, StepResult[]>();
+    const perTaskResults = new Map<number, StepResult[]>()
     for (let i = 0; i < results.length; i++) {
-      const entry = mapping[i];
-      if (!entry) continue;
-      const { taskIndex, key } = entry;
-      const result = results[i] as RawResult;
+      const entry = mapping[i]
+      if (!entry) continue
+      const { taskIndex, key } = entry
+      const result = results[i] as RawResult
 
-      if (result.status === "success") {
-        let list = perTaskResults.get(taskIndex);
+      if (result.status === 'success') {
+        let list = perTaskResults.get(taskIndex)
         if (!list) {
-          list = [];
-          perTaskResults.set(taskIndex, list);
+          list = []
+          perTaskResults.set(taskIndex, list)
         }
-        list.push({ key, value: result.value });
+        list.push({ key, value: result.value })
       }
     }
 
     perTaskResults.forEach((resultsForTask, taskIndex) => {
-      const task = tasks[taskIndex];
+      const task = tasks[taskIndex]
       if (task) {
-        task.consumeStepResults(step, resultsForTask);
+        task.consumeStepResults(step, resultsForTask)
       }
-    });
+    })
   }
 
-  return tasks.map((task) => task.finalize());
+  return tasks.map((task) => task.finalize())
 }
 
-export type { StepExecutor, StepCall, StepResult, RawResult };
+export type { StepExecutor, StepCall, StepResult, RawResult }

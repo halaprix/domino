@@ -1,30 +1,30 @@
-export const MULTICALL3_ADDRESS = "0xcA11bde05977b3631167028862bE2a173976CA11" as const;
+export const MULTICALL3_ADDRESS = '0xcA11bde05977b3631167028862bE2a173976CA11' as const
 
 export const multicall3Abi = [
   {
     inputs: [
       {
         components: [
-          { name: "target", type: "address" },
-          { name: "allowFailure", type: "bool" },
-          { name: "callData", type: "bytes" },
+          { name: 'target', type: 'address' },
+          { name: 'allowFailure', type: 'bool' },
+          { name: 'callData', type: 'bytes' },
         ],
-        name: "calls",
-        type: "tuple[]",
+        name: 'calls',
+        type: 'tuple[]',
       },
     ],
-    name: "aggregate3",
+    name: 'aggregate3',
     outputs: [
       {
         components: [
-          { name: "success", type: "bool" },
-          { name: "returnData", type: "bytes" },
+          { name: 'success', type: 'bool' },
+          { name: 'returnData', type: 'bytes' },
         ],
-        name: "returnData",
-        type: "tuple[]",
+        name: 'returnData',
+        type: 'tuple[]',
       },
     ],
-    stateMutability: "view",
-    type: "function",
+    stateMutability: 'view',
+    type: 'function',
   },
-] as const;
+] as const

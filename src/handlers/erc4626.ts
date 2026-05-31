@@ -9,53 +9,52 @@
  *                    maxRedeem → then convertToAssets(balance))
  */
 
-import type { Address, MultistepTask, StepCall, StepResult, StepExecutor } from "../core/types";
-import { runMultistepTasks } from "../core/runMultistepTasks";
-import { ViemExecutor } from "../engines/ViemExecutor";
+import type { Address, MultistepTask, StepCall, StepResult, StepExecutor } from '../core/types'
+import { runMultistepTasks } from '../core/runMultistepTasks'
 
 /** Minimal ERC20 ABI — only the functions used for vault metadata + balance. */
 const erc20Abi = [
-  "function symbol() view returns (string)",
-  "function decimals() view returns (uint8)",
-  "function balanceOf(address) view returns (uint256)",
-] as const;
+  'function symbol() view returns (string)',
+  'function decimals() view returns (uint8)',
+  'function balanceOf(address) view returns (uint256)',
+] as const
 
 /** Minimal ERC4626 ABI — only the functions used by buildErc4626Task. */
 const erc4626Abi = [
-  "function asset() view returns (address)",
-  "function maxWithdraw(address) view returns (uint256)",
-  "function maxRedeem(address) view returns (uint256)",
-  "function convertToAssets(uint256) view returns (uint256)",
-] as const;
+  'function asset() view returns (address)',
+  'function maxWithdraw(address) view returns (uint256)',
+  'function maxRedeem(address) view returns (uint256)',
+  'function convertToAssets(uint256) view returns (uint256)',
+] as const
 
 export interface Erc4626VaultResolution {
   metadata: {
-    symbol: string | undefined;
-    decimals: number | undefined;
-    underlyingAsset: Address | undefined;
-    maxWithdraw: bigint | undefined;
-    maxRedeem: bigint | undefined;
-  };
-  position: { balance: bigint; assets: bigint } | undefined;
+    symbol: string | undefined
+    decimals: number | undefined
+    underlyingAsset: Address | undefined
+    maxWithdraw: bigint | undefined
+    maxRedeem: bigint | undefined
+  }
+  position: { balance: bigint; assets: bigint } | undefined
 }
 
 type Erc4626Context = {
-  symbol?: string;
-  decimals?: number;
-  balance?: bigint;
-  maxWithdraw?: bigint;
-  maxRedeem?: bigint;
-  underlyingAsset?: Address;
-  assets?: bigint;
-};
+  symbol?: string
+  decimals?: number
+  balance?: bigint
+  maxWithdraw?: bigint
+  maxRedeem?: bigint
+  underlyingAsset?: Address
+  assets?: bigint
+}
 
 export function buildErc4626Task(params: {
-  vault: Address;
-  owner?: Address;
+  vault: Address
+  owner?: Address
 }): MultistepTask<Erc4626VaultResolution> {
-  const { vault, owner } = params;
-  const ctx: Erc4626Context = {};
-  const hasOwner = !!owner;
+  const { vault, owner } = params
+  const ctx: Erc4626Context = {}
+  const hasOwner = !!owner
 
   return {
     maxStep: hasOwner ? 2 : 1,
@@ -63,49 +62,67 @@ export function buildErc4626Task(params: {
     buildStepCalls(step) {
       if (step === 1) {
         const calls: StepCall[] = [
-          { key: "symbol", target: vault, abi: erc20Abi, functionName: "symbol" },
-          { key: "decimals", target: vault, abi: erc20Abi, functionName: "decimals" },
-          { key: "asset", target: vault, abi: erc4626Abi, functionName: "asset" },
-        ];
+          { key: 'symbol', target: vault, abi: erc20Abi, functionName: 'symbol' },
+          { key: 'decimals', target: vault, abi: erc20Abi, functionName: 'decimals' },
+          { key: 'asset', target: vault, abi: erc4626Abi, functionName: 'asset' },
+        ]
         if (hasOwner && owner) {
           calls.push(
-            { key: "balance", target: vault, abi: erc20Abi, functionName: "balanceOf", args: [owner] },
-            { key: "maxWithdraw", target: vault, abi: erc4626Abi, functionName: "maxWithdraw", args: [owner] },
-            { key: "maxRedeem", target: vault, abi: erc4626Abi, functionName: "maxRedeem", args: [owner] },
-          );
+            {
+              key: 'balance',
+              target: vault,
+              abi: erc20Abi,
+              functionName: 'balanceOf',
+              args: [owner],
+            },
+            {
+              key: 'maxWithdraw',
+              target: vault,
+              abi: erc4626Abi,
+              functionName: 'maxWithdraw',
+              args: [owner],
+            },
+            {
+              key: 'maxRedeem',
+              target: vault,
+              abi: erc4626Abi,
+              functionName: 'maxRedeem',
+              args: [owner],
+            },
+          )
         }
-        return calls;
+        return calls
       }
 
       if (step === 2 && hasOwner) {
-        if (ctx.balance === undefined) return [];
+        if (ctx.balance === undefined) return []
         return [
           {
-            key: "assets",
+            key: 'assets',
             target: vault,
             abi: erc4626Abi,
-            functionName: "convertToAssets",
+            functionName: 'convertToAssets',
             args: [ctx.balance],
           },
-        ];
+        ]
       }
 
-      return [];
+      return []
     },
 
     consumeStepResults(step, results: StepResult[]) {
       for (const result of results) {
         if (step === 1) {
-          if (result.key === "symbol") ctx.symbol = result.value as string;
-          if (result.key === "decimals") ctx.decimals = Number(result.value as bigint);
-          if (result.key === "asset") ctx.underlyingAsset = result.value as Address;
+          if (result.key === 'symbol') ctx.symbol = result.value as string
+          if (result.key === 'decimals') ctx.decimals = Number(result.value as bigint)
+          if (result.key === 'asset') ctx.underlyingAsset = result.value as Address
           if (hasOwner) {
-            if (result.key === "balance") ctx.balance = BigInt(result.value as string);
-            if (result.key === "maxWithdraw") ctx.maxWithdraw = BigInt(result.value as string);
-            if (result.key === "maxRedeem") ctx.maxRedeem = BigInt(result.value as string);
+            if (result.key === 'balance') ctx.balance = BigInt(result.value as string)
+            if (result.key === 'maxWithdraw') ctx.maxWithdraw = BigInt(result.value as string)
+            if (result.key === 'maxRedeem') ctx.maxRedeem = BigInt(result.value as string)
           }
         }
-        if (step === 2 && result.key === "assets") ctx.assets = BigInt(result.value as string);
+        if (step === 2 && result.key === 'assets') ctx.assets = BigInt(result.value as string)
       }
     },
 
@@ -122,38 +139,33 @@ export function buildErc4626Task(params: {
           hasOwner && ctx.balance !== undefined && ctx.assets !== undefined
             ? { balance: ctx.balance, assets: ctx.assets }
             : undefined,
-      };
+      }
     },
-  };
-}
-
-/** Coerce to StepExecutor — callers must pass a StepExecutor directly. */
-function toExecutor(client: StepExecutor): StepExecutor {
-  return client;
+  }
 }
 
 export async function resolveErc4626Vault(params: {
-  client: StepExecutor;
-  vault: Address;
-  owner?: Address;
+  client: StepExecutor
+  vault: Address
+  owner?: Address
 }): Promise<Erc4626VaultResolution> {
-  const executor = toExecutor(params.client);
-  const taskParams: { vault: Address; owner?: Address } = { vault: params.vault };
-  if (params.owner !== undefined) taskParams.owner = params.owner;
-  const [result] = await runMultistepTasks(executor, [buildErc4626Task(taskParams)]);
-  return result!;
+  const executor = params.client
+  const taskParams: { vault: Address; owner?: Address } = { vault: params.vault }
+  if (params.owner !== undefined) taskParams.owner = params.owner
+  const [result] = await runMultistepTasks(executor, [buildErc4626Task(taskParams)])
+  return result!
 }
 
 export async function resolveErc4626VaultsBulk(params: {
-  client: StepExecutor;
-  entries: { vault: Address; owner?: Address }[];
+  client: StepExecutor
+  entries: { vault: Address; owner?: Address }[]
 }): Promise<Erc4626VaultResolution[]> {
-  if (params.entries.length === 0) return [];
-  const executor = toExecutor(params.client);
+  if (params.entries.length === 0) return []
+  const executor = params.client
   const tasks = params.entries.map((e) => {
     return e.owner !== undefined
       ? buildErc4626Task({ vault: e.vault, owner: e.owner as Address })
-      : buildErc4626Task({ vault: e.vault });
-  });
-  return runMultistepTasks(executor, tasks);
+      : buildErc4626Task({ vault: e.vault })
+  })
+  return runMultistepTasks(executor, tasks)
 }

@@ -6,31 +6,29 @@
  * consumeStepResults, and finalize.
  */
 
-import type { MultistepTask, StepCall, StepResult } from "./types";
+import type { MultistepTask, StepCall, StepResult } from './types'
 
 /**
  * Result type placeholder — override in subclass.
  */
-export type TaskResult<T> = T;
+export type TaskResult<T> = T
 
-export abstract class MultistepTaskBase<TResult>
-  implements MultistepTask<TResult>
-{
+export abstract class MultistepTaskBase<TResult> implements MultistepTask<TResult> {
   /** Current step counter — incremented by runMultistepTasks. */
-  protected currentStep = 0;
+  protected currentStep = 0
 
   /** Internal context accumulated across steps. */
-  protected context: Record<string, unknown> = {};
+  protected context: Record<string, unknown> = {}
 
-  abstract readonly maxStep: number;
+  abstract readonly maxStep: number
 
-  abstract buildStepCalls(step: number): StepCall[];
-  abstract consumeStepResults(step: number, results: StepResult[]): void;
-  abstract finalize(): TResult;
+  abstract buildStepCalls(step: number): StepCall[]
+  abstract consumeStepResults(step: number, results: StepResult[]): void
+  abstract finalize(): TResult
 
   /** Override to return current context for inspection. */
   getContext(): Record<string, unknown> {
-    return { ...this.context };
+    return { ...this.context }
   }
 
   /**
@@ -38,7 +36,7 @@ export abstract class MultistepTaskBase<TResult>
    * Subclasses use this in consumeStepResults.
    */
   protected set(key: string, value: unknown): void {
-    this.context[key] = value;
+    this.context[key] = value
   }
 
   /**
@@ -46,6 +44,6 @@ export abstract class MultistepTaskBase<TResult>
    * Subclasses use this in buildStepCalls to gate step 2 on step 1 results.
    */
   protected get<T = unknown>(key: string): T | undefined {
-    return this.context[key] as T | undefined;
+    return this.context[key] as T | undefined
   }
 }
