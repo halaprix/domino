@@ -21,7 +21,16 @@ export type ResolverEngine = ResolverEngineGeneric<string>
 
 function normalizeEthersV5Value(value: unknown): unknown {
   if (BigNumber.isBigNumber(value)) return value.toBigInt()
-  if (Array.isArray(value)) return value.map(normalizeEthersV5Value)
+  if (Array.isArray(value)) {
+    const arr = value.map(normalizeEthersV5Value)
+    for (const key in value) {
+      if (isNaN(Number(key))) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ;(arr as any)[key] = normalizeEthersV5Value((value as any)[key])
+      }
+    }
+    return arr
+  }
   return value
 }
 
