@@ -1,5 +1,5 @@
 {
-  "name": "multistep-multicall",
+  "name": "multicall-resolver",
   "version": "0.1.0",
   "private": false,
   "type": "module",
@@ -16,6 +16,36 @@
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
       }
+    },
+    "./engines/viem": {
+      "import": {
+        "types": "./dist/engines/viem.d.ts",
+        "default": "./dist/engines/viem.js"
+      },
+      "require": {
+        "types": "./dist/engines/viem.d.cts",
+        "default": "./dist/engines/viem.cjs"
+      }
+    },
+    "./engines/ethers-v6": {
+      "import": {
+        "types": "./dist/engines/ethers-v6.d.ts",
+        "default": "./dist/engines/ethers-v6.js"
+      },
+      "require": {
+        "types": "./dist/engines/ethers-v6.d.cts",
+        "default": "./dist/engines/ethers-v6.cjs"
+      }
+    },
+    "./engines/ethers-v5": {
+      "import": {
+        "types": "./dist/engines/ethers-v5.d.ts",
+        "default": "./dist/engines/ethers-v5.js"
+      },
+      "require": {
+        "types": "./dist/engines/ethers-v5.d.cts",
+        "default": "./dist/engines/ethers-v5.cjs"
+      }
     }
   },
   "scripts": {
@@ -27,10 +57,13 @@
     "lint:fix": "eslint src --fix"
   },
   "peerDependencies": {
-    "viem": "^2.0.0"
+    "viem": "^2.0.0",
+    "ethers": "^5.0.0 || ^6.0.0"
   },
   "devDependencies": {
     "viem": "^2.39.0",
+    "ethers": "^6.0.0",
+    "ethers-v5": "npm:ethers@^5.0.0",
     "typescript": "^5.5.0",
     "tsup": "^8.0.0",
     "vitest": "^2.0.0",
@@ -44,6 +77,7 @@
     "multicall",
     "evm",
     "viem",
+    "ethers",
     "blockchain",
     "rpc",
     "batch"

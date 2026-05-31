@@ -1,6 +1,24 @@
+/**
+ * ERC20 handler — framework-agnostic task builder + convenience functions.
+ *
+ * Builds a MultistepTask that resolves ERC20 token metadata (symbol, decimals)
+ * and optionally an owner's balance.
+ *
+ * Single-step task:
+ *   Step 1: symbol(), decimals(), balanceOf(owner?)
+ */
+
 import { type Address, type PublicClient, erc20Abi } from "viem";
 import type { Abi } from "viem";
-import { type MultistepTask, runMultistepTasks } from "../multistepMulticall";
+import type { MultistepTask, StepCall, StepResult, StepExecutor } from "../core/types";
+import { runMultistepTasks } from "../core/runMultistepTasks";
+import { ViemExecutor } from "../engines/ViemExecutor";
+
+export interface Erc20TokenResolution {
+  symbol: string | undefined;
+  decimals: number | undefined;
+  balance: bigint | undefined;
+}
 
 type Erc20Context = {
   symbol?: string;
@@ -8,35 +26,21 @@ type Erc20Context = {
   balance?: bigint;
 };
 
-export interface ResolvedErc20Token {
-  symbol: string | undefined;
-  decimals: number | undefined;
-  balance: bigint | undefined;
-}
-
-type Erc20Task = MultistepTask<ResolvedErc20Token>;
-
-function buildErc20Task(params: {
+export function buildErc20Task(params: {
   token: Address;
-  owner: Address | undefined;
-}): Erc20Task {
+  owner?: Address;
+}): MultistepTask<Erc20TokenResolution> {
   const { token, owner } = params;
   const ctx: Erc20Context = {};
   const hasOwner = !!owner;
 
-  const task: Erc20Task = {
+  return {
     maxStep: 1,
 
     buildStepCalls(step) {
       if (step !== 1) return [];
 
-      const calls: {
-        key: string;
-        target: Address;
-        abi: Abi;
-        functionName: string;
-        args?: readonly unknown[];
-      }[] = [
+      const calls: StepCall[] = [
         {
           key: "symbol",
           target: token,
@@ -64,9 +68,7 @@ function buildErc20Task(params: {
       return calls;
     },
 
-    consumeStepResults(step, results) {
-      if (step !== 1) return;
-
+    consumeStepResults(_step, results: StepResult[]) {
       for (const result of results) {
         if (result.key === "symbol") {
           ctx.symbol = result.value as string;
@@ -88,40 +90,36 @@ function buildErc20Task(params: {
       };
     },
   };
-
-  return task;
 }
 
-/**
- * Resolve ERC20 token metadata and optionally balance for an owner.
- *
- * Single-step task:
- * - symbol(), decimals(), balanceOf(owner?)
- */
+/** Coerce to StepExecutor — wraps PublicClient in ViemExecutor if needed. */
+function toExecutor(client: StepExecutor | PublicClient): StepExecutor {
+  if ("executeMulticall" in client) return client;
+  return new ViemExecutor(client);
+}
+
 export async function resolveErc20Token(params: {
-  client: PublicClient;
+  client: StepExecutor | PublicClient;
   token: Address;
-  owner: Address | undefined;
-}): Promise<ResolvedErc20Token> {
-  const { client, token, owner } = params;
-  const task = buildErc20Task({ token, owner });
-  const [resolution] = await runMultistepTasks(client, [task]);
-  return resolution!;
+  owner?: Address;
+}): Promise<Erc20TokenResolution> {
+  const executor = toExecutor(params.client);
+  const taskParams: { token: Address; owner?: Address } = { token: params.token };
+  if (params.owner !== undefined) taskParams.owner = params.owner;
+  const [result] = await runMultistepTasks(executor, [buildErc20Task(taskParams)]);
+  return result!;
 }
 
-/**
- * Resolve multiple ERC20 tokens in a single multicall.
- *
- * All tokens' step 1 calls are batched into one multicall.
- */
 export async function resolveErc20TokensBulk(params: {
-  client: PublicClient;
+  client: StepExecutor | PublicClient;
   entries: { token: Address; owner?: Address }[];
-}): Promise<ResolvedErc20Token[]> {
-  const { client, entries } = params;
-  if (entries.length === 0) return [];
-  const tasks = entries.map((entry) =>
-    buildErc20Task({ token: entry.token, owner: entry.owner ?? undefined }),
-  );
-  return runMultistepTasks(client, tasks);
+}): Promise<Erc20TokenResolution[]> {
+  if (params.entries.length === 0) return [];
+  const executor = toExecutor(params.client);
+  const tasks = params.entries.map((e) => {
+    return e.owner !== undefined
+      ? buildErc20Task({ token: e.token, owner: e.owner as Address })
+      : buildErc20Task({ token: e.token });
+  });
+  return runMultistepTasks(executor, tasks);
 }

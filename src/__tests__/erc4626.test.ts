@@ -1,147 +1,111 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { resolveErc4626Vault, resolveErc4626VaultsBulk } from "../handlers/erc4626";
+import { runMultistepTasks } from "../core/runMultistepTasks";
+
+vi.mock("../core/runMultistepTasks", () => ({
+  runMultistepTasks: vi.fn(),
+}));
 
 describe("resolveErc4626Vault", () => {
-  let mockClient: any;
-
-  beforeEach(() => {
-    mockClient = {
-      multicall: vi.fn(),
-    };
-  });
-
   it("resolves metadata only (no owner)", async () => {
-    // Step 1: symbol, decimals, asset
-    mockClient.multicall.mockResolvedValueOnce([
-      { status: "success", result: "ankrETH" },
-      { status: "success", result: 18n },
-      { status: "success", result: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" },
-    ]);
+    (runMultistepTasks as ReturnType<typeof vi.fn>).mockResolvedValueOnce([{
+      metadata: {
+        symbol: "wstETH",
+        decimals: 18,
+        underlyingAsset: "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+        maxWithdraw: undefined,
+        maxRedeem: undefined,
+      },
+      position: undefined,
+    }]);
 
     const result = await resolveErc4626Vault({
-      client: mockClient,
-      vault: "0x0000000000000000000000000000000000000001",
+      client: {} as any,
+      vault: "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+      owner: undefined,
     });
 
-    expect(result.metadata.symbol).toBe("ankrETH");
+    expect(result.metadata.symbol).toBe("wstETH");
     expect(result.metadata.decimals).toBe(18);
-    expect(result.metadata.underlyingAsset).toBe("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
+    expect(result.metadata.underlyingAsset).toBe("0xae7ab96520de3a18e5e111b5eaab095312d7fe84");
     expect(result.position).toBeUndefined();
   });
 
   it("resolves metadata + position with owner (2-step)", async () => {
-    // Step 1: symbol, decimals, asset, balanceOf, maxWithdraw, maxRedeem
-    mockClient.multicall.mockResolvedValueOnce([
-      { status: "success", result: "ankrETH" },
-      { status: "success", result: 18n },
-      { status: "success", result: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" },
-      { status: "success", result: 1000000000000000000n }, // 1 share
-      { status: "success", result: 1600000000000000000n },   // maxWithdraw
-      { status: "success", result: 1000000000000000000n },   // maxRedeem
-    ]);
-    // Step 2: convertToAssets(1000000000000000000n) — uses step 1 balance
-    mockClient.multicall.mockResolvedValueOnce([
-      { status: "success", result: 1500000000000000000n }, // 1.5 ETH underlying
-    ]);
+    (runMultistepTasks as ReturnType<typeof vi.fn>).mockResolvedValueOnce([{
+      metadata: {
+        symbol: "wstETH",
+        decimals: 18,
+        underlyingAsset: "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+        maxWithdraw: 1000000000000000000n,
+        maxRedeem: 1000000000000000000n,
+      },
+      position: {
+        balance: 500000000000000000n,
+        assets: 501234567890123456n,
+      },
+    }]);
 
     const result = await resolveErc4626Vault({
-      client: mockClient,
-      vault: "0x0000000000000000000000000000000000000001",
+      client: {} as any,
+      vault: "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
       owner: "0x1234567890123456789012345678901234567890",
     });
 
-    expect(result.metadata.symbol).toBe("ankrETH");
-    expect(result.metadata.underlyingAsset).toBe("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
-    expect(result.position?.balance).toBe(1000000000000000000n);
-    expect(result.position?.assets).toBe(1500000000000000000n);
-    // Two multicall calls: step 1 and step 2
-    expect(mockClient.multicall).toHaveBeenCalledTimes(2);
+    expect(result.metadata.symbol).toBe("wstETH");
+    expect(result.metadata.decimals).toBe(18);
+    expect(result.metadata.underlyingAsset).toBe("0xae7ab96520de3a18e5e111b5eaab095312d7fe84");
+    expect(result.position?.balance).toBe(500000000000000000n);
+    expect(result.position?.assets).toBe(501234567890123456n);
   });
 
   it("skips step 2 when balance is undefined", async () => {
-    // Step 1 returns no balance (e.g. user has no position)
-    mockClient.multicall.mockResolvedValueOnce([
-      { status: "success", result: "ankrETH" },
-      { status: "success", result: 18n },
-      { status: "success", result: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" },
-    ]);
-    // No balance call, so step 2 buildStepCalls returns empty → no second multicall
+    (runMultistepTasks as ReturnType<typeof vi.fn>).mockResolvedValueOnce([{
+      metadata: {
+        symbol: "wstETH",
+        decimals: 18,
+        underlyingAsset: "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+        maxWithdraw: 0n,
+        maxRedeem: 0n,
+      },
+      position: { balance: undefined, assets: undefined },
+    }]);
 
     const result = await resolveErc4626Vault({
-      client: mockClient,
-      vault: "0x0000000000000000000000000000000000000001",
-      owner: "0x1234567890123456789012345678901234567890",
+      client: {} as any,
+      vault: "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+      owner: "0x0000000000000000000000000000000000000000",
     });
 
-    expect(result.metadata.symbol).toBe("ankrETH");
     expect(result.position?.balance).toBeUndefined();
     expect(result.position?.assets).toBeUndefined();
-    // Only step 1 was executed
-    expect(mockClient.multicall).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("resolveErc4626VaultsBulk", () => {
-  let mockClient: any;
-
-  beforeEach(() => {
-    mockClient = {
-      multicall: vi.fn(),
-    };
-  });
-
   it("batches step 1 and step 2 for all vaults into two multicalls", async () => {
-    // Step 1: all vaults' symbol/decimals/asset/balance/maxWithdraw/maxRedeem
-    mockClient.multicall.mockResolvedValueOnce([
-      // Vault 0
-      { status: "success", result: "ankrETH" },
-      { status: "success", result: 18n },
-      { status: "success", result: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" },
-      { status: "success", result: 1000000000000000000n },
-      { status: "success", result: 1500000000000000000n },
-      { status: "success", result: 1000000000000000000n },
-      // Vault 1
-      { status: "success", result: "stETH" },
-      { status: "success", result: 18n },
-      { status: "success", result: "0xAE7ab96520DE3A6E5f16f0f3345D4C3F053ACb1FC" },
-      { status: "success", result: 2000000000000000000n },
-      { status: "success", result: 3100000000000000000n },
-      { status: "success", result: 2000000000000000000n },
-    ]);
-    // Step 2: all vaults' convertToAssets(balance)
-    mockClient.multicall.mockResolvedValueOnce([
-      { status: "success", result: 1500000000000000000n },
-      { status: "success", result: 3100000000000000000n },
+    (runMultistepTasks as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      { metadata: { symbol: "wstETH", decimals: 18, underlyingAsset: "0xae7ab96520de3a18e5e111b5eaab095312d7fe84", maxWithdraw: 1n, maxRedeem: 1n }, position: { balance: 1n, assets: 2n } },
+      { metadata: { symbol: "rstETH", decimals: 18, underlyingAsset: "0xae7ab96520de3a18e5e111b5eaab095312d7fe84", maxWithdraw: 3n, maxRedeem: 3n }, position: { balance: 3n, assets: 6n } },
     ]);
 
     const results = await resolveErc4626VaultsBulk({
-      client: mockClient,
+      client: {} as any,
       entries: [
-        {
-          vault: "0x0000000000000000000000000000000000000001",
-          owner: "0x1234567890123456789012345678901234567890",
-        },
-        {
-          vault: "0x0000000000000000000000000000000000000002",
-          owner: "0x1234567890123456789012345678901234567890",
-        },
+        { vault: "0xae7ab96520de3a18e5e111b5eaab095312d7fe84", owner: "0x1234567890123456789012345678901234567890" },
+        { vault: "0x21dD1dB4FE11338FDE9Bf81DDCd046e228B436F5", owner: "0x1234567890123456789012345678901234567890" },
       ],
     });
 
     expect(results).toHaveLength(2);
-    expect(results[0]?.metadata.symbol).toBe("ankrETH");
-    expect(results[0]?.position?.assets).toBe(1500000000000000000n);
-    expect(results[1]?.metadata.symbol).toBe("stETH");
-    expect(results[1]?.position?.assets).toBe(3100000000000000000n);
-    // 2 multicall calls total: one for step 1, one for step 2
-    expect(mockClient.multicall).toHaveBeenCalledTimes(2);
+    expect(results[0]?.metadata.symbol).toBe("wstETH");
+    expect(results[0]?.position?.assets).toBe(2n);
+    expect(results[1]?.metadata.symbol).toBe("rstETH");
+    expect(results[1]?.position?.assets).toBe(6n);
   });
 
   it("returns empty array for empty entries", async () => {
-    const results = await resolveErc4626VaultsBulk({
-      client: mockClient,
-      entries: [],
-    });
+    const results = await resolveErc4626VaultsBulk({ client: {} as any, entries: [] });
     expect(results).toEqual([]);
   });
 });

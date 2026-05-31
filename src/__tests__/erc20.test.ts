@@ -1,27 +1,27 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { resolveErc20Token, resolveErc20TokensBulk } from "../handlers/erc20";
-import { erc20Abi } from "viem";
+import type { RawResult } from "../core/types";
 
 describe("resolveErc20Token", () => {
-  let mockClient: any;
+  let mockExecutor: { executeMulticall: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
-    mockClient = {
-      multicall: vi.fn(),
+    mockExecutor = {
+      executeMulticall: vi.fn(),
     };
   });
 
   it("resolves symbol and decimals without owner", async () => {
-    mockClient.multicall.mockResolvedValueOnce([
-      { status: "success", result: "USDC" },
-      { status: "success", result: 6n },
-    ]);
+    // StepExecutor.executeMulticall returns RawResult[]: { status, value? }[]
+    mockExecutor.executeMulticall.mockResolvedValueOnce([
+      { status: "success", value: "USDC" },
+      { status: "success", value: 6n },
+    ] as RawResult[]);
 
     const result = await resolveErc20Token({
-      client: mockClient,
+      client: mockExecutor as any,
       token: "0xA0b86991c6218b36c1d19D4a2e9Eb004C35d5Cc4",
-      owner: undefined,
-    });
+    } as any);
 
     expect(result.symbol).toBe("USDC");
     expect(result.decimals).toBe(6);
@@ -29,18 +29,17 @@ describe("resolveErc20Token", () => {
   });
 
   it("resolves symbol, decimals, and balance with owner", async () => {
-    // Single step: symbol, decimals, balanceOf
-    mockClient.multicall.mockResolvedValueOnce([
-      { status: "success", result: "USDC" },
-      { status: "success", result: 6n },
-      { status: "success", result: 1000000n },
-    ]);
+    mockExecutor.executeMulticall.mockResolvedValueOnce([
+      { status: "success", value: "USDC" },
+      { status: "success", value: 6n },
+      { status: "success", value: "1000000" },
+    ] as RawResult[]);
 
     const result = await resolveErc20Token({
-      client: mockClient,
+      client: mockExecutor as any,
       token: "0xA0b86991c6218b36c1d19D4a2e9Eb004C35d5Cc4",
       owner: "0x1234567890123456789012345678901234567890",
-    });
+    } as any);
 
     expect(result.symbol).toBe("USDC");
     expect(result.decimals).toBe(6);
@@ -49,29 +48,29 @@ describe("resolveErc20Token", () => {
 });
 
 describe("resolveErc20TokensBulk", () => {
-  let mockClient: any;
+  let mockExecutor: { executeMulticall: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
-    mockClient = {
-      multicall: vi.fn(),
+    mockExecutor = {
+      executeMulticall: vi.fn(),
     };
   });
 
   it("resolves multiple tokens in one multicall", async () => {
     // All tasks batched into single step 1
-    mockClient.multicall.mockResolvedValueOnce([
+    mockExecutor.executeMulticall.mockResolvedValueOnce([
       // Token 0
-      { status: "success", result: "USDC" },
-      { status: "success", result: 6n },
-      { status: "success", result: 1000000n },
+      { status: "success", value: "USDC" },
+      { status: "success", value: 6n },
+      { status: "success", value: "1000000" },
       // Token 1
-      { status: "success", result: "WETH" },
-      { status: "success", result: 18n },
-      { status: "success", result: 2000000000000000000n },
-    ]);
+      { status: "success", value: "WETH" },
+      { status: "success", value: 18n },
+      { status: "success", value: "2000000000000000000" },
+    ] as RawResult[]);
 
     const results = await resolveErc20TokensBulk({
-      client: mockClient,
+      client: mockExecutor as any,
       entries: [
         {
           token: "0xA0b86991c6218b36c1d19D4a2e9Eb004C35d5Cc4",
@@ -89,16 +88,16 @@ describe("resolveErc20TokensBulk", () => {
     expect(results[0]?.balance).toBe(1000000n);
     expect(results[1]?.symbol).toBe("WETH");
     expect(results[1]?.balance).toBe(2000000000000000000n);
-    // Single multicall call for 6 contract calls
-    expect(mockClient.multicall).toHaveBeenCalledTimes(1);
+    // Single executeMulticall call for 6 contract calls
+    expect(mockExecutor.executeMulticall).toHaveBeenCalledTimes(1);
   });
 
   it("returns empty array for empty entries", async () => {
     const results = await resolveErc20TokensBulk({
-      client: mockClient,
+      client: mockExecutor as any,
       entries: [],
     });
     expect(results).toEqual([]);
-    expect(mockClient.multicall).not.toHaveBeenCalled();
+    expect(mockExecutor.executeMulticall).not.toHaveBeenCalled();
   });
 });
