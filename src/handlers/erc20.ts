@@ -9,7 +9,6 @@
  */
 
 import { type Address, type PublicClient, erc20Abi } from "viem";
-import type { Abi } from "viem";
 import type { MultistepTask, StepCall, StepResult, StepExecutor } from "../core/types";
 import { runMultistepTasks } from "../core/runMultistepTasks";
 import { ViemExecutor } from "../engines/ViemExecutor";
@@ -44,13 +43,13 @@ export function buildErc20Task(params: {
         {
           key: "symbol",
           target: token,
-          abi: erc20Abi as Abi,
+          abi: [...erc20Abi],
           functionName: "symbol",
         },
         {
           key: "decimals",
           target: token,
-          abi: erc20Abi as Abi,
+          abi: [...erc20Abi],
           functionName: "decimals",
         },
       ];
@@ -59,7 +58,7 @@ export function buildErc20Task(params: {
         calls.push({
           key: "balance",
           target: token,
-          abi: erc20Abi as Abi,
+          abi: [...erc20Abi],
           functionName: "balanceOf",
           args: [owner],
         });

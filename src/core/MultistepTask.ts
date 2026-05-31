@@ -6,7 +6,7 @@
  * consumeStepResults, and finalize.
  */
 
-import type { MultistepTask, StepResult } from "./types";
+import type { MultistepTask, StepCall, StepResult } from "./types";
 
 /**
  * Result type placeholder — override in subclass.
@@ -24,7 +24,7 @@ export abstract class MultistepTaskBase<TResult>
 
   abstract readonly maxStep: number;
 
-  abstract buildStepCalls(step: number): import("./types").StepCall[];
+  abstract buildStepCalls(step: number): StepCall[];
   abstract consumeStepResults(step: number, results: StepResult[]): void;
   abstract finalize(): TResult;
 

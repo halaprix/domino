@@ -14,7 +14,7 @@ export interface StepCall {
   /** Target contract address. */
   target: `0x${string}`;
   /** ABI for the contract (used by viem). */
-  abi: import("viem").Abi;
+  abi: unknown[];
   /** Function name to call. */
   functionName: string;
   /** Raw arguments — validated at viem call-site, not here. */

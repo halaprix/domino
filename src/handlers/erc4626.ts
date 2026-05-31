@@ -10,7 +10,6 @@
  */
 
 import { type Address, type PublicClient, erc20Abi, erc4626Abi } from "viem";
-import type { Abi } from "viem";
 import type { MultistepTask, StepCall, StepResult, StepExecutor } from "../core/types";
 import { runMultistepTasks } from "../core/runMultistepTasks";
 import { ViemExecutor } from "../engines/ViemExecutor";
@@ -50,15 +49,15 @@ export function buildErc4626Task(params: {
     buildStepCalls(step) {
       if (step === 1) {
         const calls: StepCall[] = [
-          { key: "symbol", target: vault, abi: erc20Abi as Abi, functionName: "symbol" },
-          { key: "decimals", target: vault, abi: erc20Abi as Abi, functionName: "decimals" },
-          { key: "asset", target: vault, abi: erc4626Abi as Abi, functionName: "asset" },
+          { key: "symbol", target: vault, abi: [...erc20Abi], functionName: "symbol" },
+          { key: "decimals", target: vault, abi: [...erc20Abi], functionName: "decimals" },
+          { key: "asset", target: vault, abi: [...erc4626Abi], functionName: "asset" },
         ];
         if (hasOwner && owner) {
           calls.push(
-            { key: "balance", target: vault, abi: erc20Abi as Abi, functionName: "balanceOf", args: [owner] },
-            { key: "maxWithdraw", target: vault, abi: erc4626Abi as Abi, functionName: "maxWithdraw", args: [owner] },
-            { key: "maxRedeem", target: vault, abi: erc4626Abi as Abi, functionName: "maxRedeem", args: [owner] },
+            { key: "balance", target: vault, abi: [...erc20Abi], functionName: "balanceOf", args: [owner] },
+            { key: "maxWithdraw", target: vault, abi: [...erc4626Abi], functionName: "maxWithdraw", args: [owner] },
+            { key: "maxRedeem", target: vault, abi: [...erc4626Abi], functionName: "maxRedeem", args: [owner] },
           );
         }
         return calls;
@@ -70,7 +69,7 @@ export function buildErc4626Task(params: {
           {
             key: "assets",
             target: vault,
-            abi: erc4626Abi as Abi,
+            abi: [...erc4626Abi],
             functionName: "convertToAssets",
             args: [ctx.balance],
           },
