@@ -217,7 +217,7 @@ interface Erc4626VaultResolution {
     maxWithdraw: bigint | undefined; // unlimited = 2^256-1
     maxRedeem: bigint | undefined;   // unlimited = 2^256-1
   };
-  position: { balance: bigint; assets: bigint } | undefined;
+  position: { balance: bigint; assets: bigint | undefined } | undefined;
   //   balance = raw share balance (vault.balanceOf(owner))
   //   assets  = underlying amount (vault.convertToAssets(balance))
 }
