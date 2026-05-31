@@ -45,40 +45,42 @@ export async function runMultistepTasks<TResult>(
       }
     }
 
-    if (calls.length === 0) {
-      continue
-    }
-
-    const results = await executor.executeMulticall(calls)
-
-    // Dev-time guard: a misbehaving executor that returns fewer results than calls
-    // would silently corrupt routing : fail loudly instead
-    if (results.length !== calls.length) {
-      throw new Error(
-        `StepExecutor returned ${results.length} results for ${calls.length} calls : length mismatch`,
-      )
-    }
-
     // Pre-allocate a 2D array indexed by taskIndex for O(1) result grouping.
     // Avoids Map hashing overhead — taskIndex is sequential zero-based, so
     // array indexing is both faster and simpler.
     const perTaskResults: StepResult[][] = Array.from({ length: tasks.length }, () => [])
 
-    for (let i = 0; i < results.length; i++) {
-      const entry = mapping[i]
-      if (!entry) continue
-      const { taskIndex, key } = entry
-      const result = results[i] as RawResult
+    // Only hit the network when there are calls; a step where every active task
+    // built nothing still dispatches empty results below (consistent per-step
+    // notification regardless of sibling tasks).
+    if (calls.length > 0) {
+      const results = await executor.executeMulticall(calls)
 
-      const list = perTaskResults[taskIndex]!
-      if (result.status === 'success') {
-        list.push({ key, value: result.value })
-      } else {
-        list.push({ key, value: undefined, status: 'failure' })
+      // Dev-time guard: a misbehaving executor that returns fewer results than
+      // calls would silently corrupt routing — fail loudly instead.
+      if (results.length !== calls.length) {
+        throw new Error(
+          `StepExecutor returned ${results.length} results for ${calls.length} calls — length mismatch`,
+        )
+      }
+
+      for (let i = 0; i < results.length; i++) {
+        const entry = mapping[i]
+        if (!entry) continue
+        const { taskIndex, key } = entry
+        const result = results[i] as RawResult
+
+        const list = perTaskResults[taskIndex]!
+        if (result.status === 'success') {
+          list.push({ key, value: result.value })
+        } else {
+          list.push({ key, value: undefined, status: 'failure' })
+        }
       }
     }
 
-    // Dispatch results to all tasks active at this step.
+    // Dispatch to every task active at this step — including those that built no
+    // calls — so consumeStepResults is invoked consistently each step.
     for (let i = 0; i < tasks.length; i++) {
       const task = tasks[i]
       if (task && step <= task.maxStep) {
