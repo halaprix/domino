@@ -8,36 +8,39 @@ Thank you for your interest in contributing! This guide covers everything you ne
 
 **Key exports:**
 - `runMultistepTasks` — core FSM executor
-- `resolveErc20Token` / `resolveErc20TokensBulk` — ERC20 token resolution
-- `resolveErc4626Vault` / `resolveErc4626VaultsBulk` — ERC4626 vault resolution
-- Engine adapters: `createResolver` (viem), `createEthersV6Resolver`, `createEthersV5Resolver`
+- `buildErc20Task` / `resolveErc20Token` / `resolveErc20TokensBulk` — ERC20 token resolution
+- `buildErc4626Task` / `resolveErc4626Vault` / `resolveErc4626VaultsBulk` — ERC4626 vault resolution
+- Engine adapters: `createResolver` from `.../engines/viem`, `.../engines/ethers-v6`, `.../engines/ethers-v5`
 
 ## Repository Structure
 
 ```
 src/
-  core/
-    types.ts           # MultistepTask, StepCall, StepResult, StepExecutor interfaces
-    runMultistepTasks.ts  # FSM executor
- adapters.ts         # viem PublicClient adapter
-  engines/
-    viem.ts            # viem PublicClient adapter
-    ethers-v6.ts # ethers v6 adapter
-    ethers-v5.ts       # ethers v5 adapter
-  handlers/
-    erc20.ts           # ERC20 resolution handler (public API)
-    erc20-task.ts      # MultistepTask implementation for ERC20
-   erc4626.ts         # ERC4626 resolution handler (public API)
-    erc4626-task.ts    # MultistepTask implementation for ERC4626
- abis/ # Embedded ABI fragments
-  __tests__/
-    erc20.test.ts
-    erc4626.test.ts
-    multistepMulticall.test.ts
-    engines/
- ViemExecutor.ts
-      ethers-v5.ts
-      ethers-v6.ts
+├── core/
+│   ├── types.ts               # MultistepTask, StepCall, StepResult, StepExecutor, Address
+│   └── runMultistepTasks.ts   # FSM executor
+├── engines/
+│   ├── viem.ts                # viem PublicClient adapter (createResolver)
+│   ├── ethers-v6.ts           # ethers v6 adapter (createResolver)
+│   ├── ethers-v5.ts           # ethers v5 adapter (createResolver)
+│   └── shared.ts              # Shared executor factory + ResolverEngine type
+├── handlers/
+│   ├── erc20.ts               # buildErc20Task + resolveErc20Token + resolveErc20TokensBulk
+│   └── erc4626.ts             # buildErc4626Task + resolveErc4626Vault + resolveErc4626VaultsBulk
+├── abis/
+│   ├── erc.ts                 # ERC20 / ERC4626 JSON ABI fragments (shared by every engine)
+│   └── multicall3.ts          # Multicall3 ABI + address
+├── __tests__/                 # vitest specs mirroring the source tree
+│   ├── engines/
+│   │   ├── viem.test.ts
+│   │   ├── ethers-v6.test.ts
+│   │   ├── ethers-v5.test.ts
+│   │   └── integration.test.ts
+│   ├── erc20.test.ts
+│   ├── erc4626.test.ts
+│   ├── multistepMulticall.test.ts
+│   └── bundle-size.test.ts
+└── index.ts                   # Public API surface
 ```
 
 ## Development Setup
@@ -48,17 +51,18 @@ cd multistep-multicall
 npm install
 ```
 
-No additional setup is required. The project uses [tsx](https://github.com/privatenumber/tsx) for running TypeScript directly, and vitest for tests.
+No additional setup is required. The project uses [tsup](https://tsup.egoist.dev) for bundling and vitest for tests.
 
 ## Available Scripts
 
 ```bash
-npm run build      # Type-check + bundle with tsup
-npm run dev       # Watch mode rebuild
-npm run test      # Run all tests (vitest)
+npm run build      # Type-check + bundle with tsup (+ postbuild rewrite)
+npm run dev        # Watch mode rebuild
+npm run test       # Run all tests (vitest)
 npm run test:coverage  # Run tests with coverage report
-npm run lint      # ESLint check
-npm run lint:fix  # ESLint auto-fix
+npm run lint       # ESLint check
+npm run lint:fix   # ESLint auto-fix
+npm run typecheck  # tsc --noEmit
 ```
 
 ## Architecture
@@ -92,9 +96,12 @@ Engines implement this interface for their respective client libraries (viem, et
 
 ### Handler conventions
 
-- `erc20.ts` / `erc4626.ts` — public API (named exports). Import from these, not the `*-task.ts` files.
-- `erc20-task.ts` / `erc4626-task.ts` — `MultistepTask` implementation. Used internally by the public API.
-- ABIs are defined as inline `const` arrays with `as const` assertion in the handler files.
+Each handler file (`erc20.ts`, `erc4626.ts`) exports three layers:
+1. **`build<Name>Task()`** — factory returning a `MultistepTask` (for users building custom pipelines)
+2. **`resolve<Name>()`** — single-entry convenience function
+3. **`resolve<Name>Bulk()`** — bulk convenience function
+
+ABIs live in `src/abis/erc.ts` as JSON ABI objects (not human-readable strings) — viem's encoder requires parsed ABI; ethers accepts the same JSON.
 
 ## Testing
 
@@ -103,20 +110,19 @@ Tests live in `src/__tests__/`. Engine-specific tests live in `src/__tests__/eng
 ### Running tests
 
 ```bash
-npm run test        # Run all tests once
-npm run test -- --watch  # Watch mode
-npm run test:coverage  # With coverage
+npm run test              # Run all tests once
+npm run test -- --watch   # Watch mode
+npm run test:coverage     # With coverage
 ```
 
 ### Test patterns
 
-**Unit tests for handlers** mock the `StepExecutor` to isolate the `buildStepCalls` / `consumeStepResults` / `finalize` logic:
+**Handler/FSM tests** mock the `StepExecutor` to isolate the `buildStepCalls` / `consumeStepResults` / `finalize` logic:
 
 ```typescript
 import { runMultistepTasks } from "../core/runMultistepTasks";
 import type { StepExecutor } from "../core/types";
 
-// Mock executor that returns canned results
 const mockExecutor: StepExecutor = {
   async executeMulticall(calls) {
     return calls.map(() => ({ status: "success", value: 18n }));
@@ -124,19 +130,20 @@ const mockExecutor: StepExecutor = {
 };
 ```
 
-**Engine integration tests** use a real viem `PublicClient` against a mainnet fork (anvil/ganache). The mock viem executor (`ViemExecutor.ts`) is the integration point.
+**Engine unit tests** mock the transport boundary — `client.multicall` (viem) or the ethers `Interface` — so they do **not** exercise real ABI encoding.
+
+**Integration test** (`src/__tests__/engines/integration.test.ts`) drives a real viem `PublicClient` (stub transport) and real ethers `Interface`, exercising actual encode/decode. Extend this when changing ABIs or executors.
 
 ### Adding a new handler
 
-1. Create `src/handlers/<name>-task.ts` implementing `MultistepTask`.
-2. Create `src/handlers/<name>.ts` exposing the public API (`resolveXxx`, `resolveXxxBulk`).
-3. Add exports to `src/index.ts`.
-4. Add a test file `src/__tests__/<name>.test.ts`.
-5. If the handler needs a new ABI, add it as a `const` array in the handler file (use `as const` for viem ABI typing).
+1. Create `src/handlers/<name>.ts` implementing `build<Name>Task()` + `resolve<Name>()` + `resolve<Name>Bulk()`.
+2. Add exports to `src/index.ts`.
+3. Add a test file `src/__tests__/<name>.test.ts`.
+4. If the handler needs a new ABI, add it to `src/abis/` and import from there.
 
 ### Adding a new engine
 
-1. Create `src/engines/<engine>.ts` implementing `StepExecutor`.
+1. Create `src/engines/<engine>.ts` exporting `createResolver`.
 2. Add exports to `src/index.ts`.
 3. Add a test file `src/__tests__/engines/<engine>.ts`.
 4. Register the entry point in `tsup.config.ts`.
@@ -166,7 +173,7 @@ Prefixes: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`
    ```
 3. **Tests are required** for all new behavior. Add tests in `src/__tests__/`.
 4. **Keep PRs focused** — one feature or fix per PR.
-5. **Update `CHANGELOG.md`** (or add a `CHANGELOG` entry) if the change affects the public API.
+5. **Update `CHANGELOG.md`** if the change affects the public API.
 6. **Fill out the PR template** if one exists.
 
 ## Code Style
@@ -177,10 +184,14 @@ Prefixes: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`
 - **No default exports** — use named exports only.
 - **Max line length**: 100 characters (enforced by ESLint).
 
+## Publishing
+
+The `prepublishOnly` script runs `npm run build && npm test` — you can't accidentally publish broken dist. CI publishes automatically when a GitHub Release is created (workflow: `publish.yml`).
+
 ## Reporting Issues
 
 Bug reports welcome! Please include:
-- Library version (`npm list multistep-multicall`)
+- Library version (`npm list @halaprix/multistep-multicall`)
 - Node / npm versions
 - Minimal reproduction case (code or repo link)
 - Expected vs actual behavior
