@@ -71,27 +71,33 @@ export async function runMultistepTasks<TResult>(
     // built nothing still dispatches empty results below (consistent per-step
     // notification regardless of sibling tasks).
     if (calls.length > 0) {
-      const results = await executor.executeMulticall(calls)
+      // Split calls into batches to stay under per-call gas limits.
+      // Each batch executes as a separate multicall round-trip.
+      for (let batchStart = 0; batchStart < calls.length; batchStart += batchSize) {
+        const batch = calls.slice(batchStart, batchStart + batchSize)
+        const results = await executor.executeMulticall(batch)
 
-      // Dev-time guard: a misbehaving executor that returns fewer results than
-      // calls would silently corrupt routing — fail loudly instead.
-      if (results.length !== calls.length) {
-        throw new Error(
-          `StepExecutor returned ${results.length} results for ${calls.length} calls — length mismatch`,
-        )
-      }
+        // Dev-time guard: a misbehaving executor that returns fewer results than
+        // calls would silently corrupt routing — fail loudly instead.
+        if (results.length !== batch.length) {
+          throw new Error(
+            `StepExecutor returned ${results.length} results for ${batch.length} calls — length mismatch`,
+          )
+        }
 
-      for (let i = 0; i < results.length; i++) {
-        const entry = mapping[i]
-        if (!entry) continue
-        const { taskIndex, key } = entry
-        const result = results[i] as RawResult
+        // Route this batch's results into the shared perTaskResults arrays.
+        for (let i = 0; i < results.length; i++) {
+          const mappingEntry = mapping[batchStart + i]
+          if (!mappingEntry) continue
+          const { taskIndex, key } = mappingEntry
+          const result = results[i] as RawResult
 
-        const list = perTaskResults[taskIndex]!
-        if (result.status === 'success') {
-          list.push({ key, value: result.value })
-        } else {
-          list.push({ key, value: undefined, status: 'failure' })
+          const list = perTaskResults[taskIndex]!
+          if (result.status === 'success') {
+            list.push({ key, value: result.value })
+          } else {
+            list.push({ key, value: undefined, status: 'failure' })
+          }
         }
       }
     }

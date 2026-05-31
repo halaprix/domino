@@ -1,6 +1,14 @@
 // Core orchestration
 export { runMultistepTasks } from './core/runMultistepTasks'
-export type { StepCall, StepResult, MultistepTask, StepExecutor, RawResult, Address } from './core/types'
+export type {
+  StepCall,
+  StepResult,
+  MultistepTask,
+  StepExecutor,
+  RawResult,
+  Address,
+} from './core/types'
+export type { BatchOptions } from './core/runMultistepTasks'
 
 // ERC20 handler
 export { buildErc20Task, resolveErc20Token, resolveErc20TokensBulk } from './handlers/erc20'
