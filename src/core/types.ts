@@ -2,7 +2,8 @@
  * Core types for the multistep-multicall library.
  *
  * MultistepTask is the framework-agnostic task description used by runMultistepTasks.
- * The actual execution is done by the viem PublicClient passed to runMultistepTasks.
+ * Execution is delegated to the StepExecutor passed to runMultistepTasks — the viem,
+ * ethers v5/v6 engines, or any custom backend.
  */
 
 /**
@@ -13,11 +14,11 @@ export interface StepCall {
   key: string
   /** Target contract address. */
   target: Address
-  /** ABI for the contract (used by viem). */
+  /** JSON ABI for the call (used by the viem engine; ethers engines ignore it). */
   abi: readonly unknown[]
   /** Function name to call. */
   functionName: string
-  /** Raw arguments : validated at viem call-site, not here. */
+  /** Raw arguments — validated by the executor, not here. */
   args?: readonly unknown[]
 }
 
