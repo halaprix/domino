@@ -35,3 +35,22 @@ for (const rel of files) {
 }
 
 console.log(`postbuild: rewrote ethers-v5 → ethers in ${rewrote} file(s)`)
+
+// Fail loudly rather than ship a broken package: the runnable v5 engine outputs
+// must exist and must no longer reference the dev-only `ethers-v5` alias. A tsup
+// config change (renamed output, or bundling instead of externalizing) would
+// otherwise slip through silently.
+const runnable = ['dist/engines/ethers-v5.js', 'dist/engines/ethers-v5.cjs'].filter((rel) =>
+  existsSync(join(root, rel)),
+)
+if (runnable.length === 0) {
+  console.error('postbuild: no ethers-v5 engine output found — did the tsup config change?')
+  process.exit(1)
+}
+for (const rel of runnable) {
+  const src = readFileSync(join(root, rel), 'utf8')
+  if (src.includes("'ethers-v5'") || src.includes('"ethers-v5"')) {
+    console.error(`postbuild: ${rel} still imports 'ethers-v5' after rewrite — publish would break`)
+    process.exit(1)
+  }
+}

@@ -41,4 +41,12 @@ describe('bundle size', () => {
     expect(size).toBeGreaterThan(0)
     expect(size).toBeLessThan(30 * 1024)
   })
+
+  it('published ethers-v5 engine imports `ethers`, not the dev-only `ethers-v5` alias', () => {
+    // postbuild.mjs rewrites the specifier so consumers (who install plain
+    // `ethers@5`) can resolve the v5 engine. Lock that in.
+    const src = readFileSync(join(distDir, 'engines/ethers-v5.js'), 'utf-8')
+    expect(src).not.toMatch(/from ['"]ethers-v5['"]/)
+    expect(src).toMatch(/from ['"]ethers['"]/)
+  })
 })
