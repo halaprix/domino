@@ -3,6 +3,7 @@
  */
 
 import { Contract, utils } from 'ethers-v5'
+import { BigNumber } from 'ethers-v5'
 import { MULTICALL3_ADDRESS, multicall3Abi } from '../abis/multicall3'
 import { ercCombinedAbi } from '../abis/erc'
 import type { StepExecutor, StepCall, RawResult } from '../core/types'
@@ -43,7 +44,9 @@ function createEthersV5Executor(mc3: Contract, iface: utils.Interface): StepExec
         if (!call) return { status: 'failure' as const }
         try {
           const decoded = iface.decodeFunctionResult(call.functionName, r.returnData)
-          const value = Array.isArray(decoded) ? decoded[0] : decoded
+          let value = Array.isArray(decoded) ? decoded[0] : decoded
+          // Normalize ethers v5 BigNumber → bigint so handlers see uniform primitives
+          if (BigNumber.isBigNumber(value)) value = value.toBigInt()
           return { status: 'success' as const, value }
         } catch {
           return { status: 'failure' as const }
@@ -76,7 +79,7 @@ export function createResolver(
 
   const abiInterface =
     iface ??
-    new utils.Interface(ercCombinedAbi as unknown as string[])
+    new utils.Interface([...ercCombinedAbi])
 
   const executor = createEthersV5Executor(mc3, abiInterface)
 

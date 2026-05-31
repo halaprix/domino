@@ -46,10 +46,10 @@ describe('ethers v5 engine', () => {
         .mockReturnValueOnce(['wstETH'] as unknown)
         .mockReturnValueOnce([18] as unknown)
         .mockReturnValueOnce(['0xae7ab96520de3a18e5e111b5eaab095312d7fe84'] as unknown)
-        .mockReturnValueOnce([1000000] as unknown)
-        .mockReturnValueOnce([1000000] as unknown)
-        .mockReturnValueOnce([1000000] as unknown)
-        .mockReturnValueOnce([900000] as unknown),
+        .mockReturnValueOnce([1000000n] as unknown)
+        .mockReturnValueOnce([1000000n] as unknown)
+        .mockReturnValueOnce([1000000n] as unknown)
+        .mockReturnValueOnce([900000n] as unknown),
     } as unknown as Interface
 
     const mockContract = {

@@ -30,6 +30,8 @@ export type Address = `0x${string}`
 export interface StepResult {
   key: string
   value: unknown
+  /** 'success' if the call reverted; undefined for successful calls. */
+  status?: 'failure'
 }
 
 /**

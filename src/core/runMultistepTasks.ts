@@ -59,7 +59,7 @@ export async function runMultistepTasks<TResult>(
       )
     }
 
-    // Group results by task
+    // Group results by task (both successes and failures)
     const perTaskResults = new Map<number, StepResult[]>()
     for (let i = 0; i < results.length; i++) {
       const entry = mapping[i]
@@ -67,22 +67,27 @@ export async function runMultistepTasks<TResult>(
       const { taskIndex, key } = entry
       const result = results[i] as RawResult
 
+      let list = perTaskResults.get(taskIndex)
+      if (!list) {
+        list = []
+        perTaskResults.set(taskIndex, list)
+      }
       if (result.status === 'success') {
-        let list = perTaskResults.get(taskIndex)
-        if (!list) {
-          list = []
-          perTaskResults.set(taskIndex, list)
-        }
         list.push({ key, value: result.value })
+      } else {
+        list.push({ key, value: undefined, status: 'failure' })
       }
     }
 
-    perTaskResults.forEach((resultsForTask, taskIndex) => {
-      const task = tasks[taskIndex]
-      if (task) {
-        task.consumeStepResults(step, resultsForTask)
+    // Dispatch results to all tasks active at this step.
+    // Iterate over ALL tasks (not perTaskResults entries) so tasks whose
+    // calls all failed still get notified with an empty results array.
+    for (let i = 0; i < tasks.length; i++) {
+      const task = tasks[i]
+      if (task && step <= task.maxStep) {
+        task.consumeStepResults(step, perTaskResults.get(i) ?? [])
       }
-    })
+    }
   }
 
   return tasks.map((task) => task.finalize())

@@ -30,7 +30,6 @@ export function buildErc20Task(params: {
 }): MultistepTask<Erc20TokenResolution> {
   const { token, owner } = params
   const ctx: Erc20Context = {}
-  const hasOwner = !!owner
 
   return {
     maxStep: 1,
@@ -53,7 +52,7 @@ export function buildErc20Task(params: {
         },
       ]
 
-      if (hasOwner && owner) {
+      if (owner) {
         calls.push({
           key: 'balance',
           target: token,
@@ -68,14 +67,15 @@ export function buildErc20Task(params: {
 
     consumeStepResults(_step, results: StepResult[]) {
       for (const result of results) {
+        if (result.status === 'failure') continue
         if (result.key === 'symbol') {
           ctx.symbol = result.value as string
         }
         if (result.key === 'decimals') {
-          ctx.decimals = Number(result.value as bigint)
+          ctx.decimals = Number(result.value)
         }
         if (result.key === 'balance') {
-          ctx.balance = BigInt(result.value as string)
+          ctx.balance = result.value as bigint
         }
       }
     },

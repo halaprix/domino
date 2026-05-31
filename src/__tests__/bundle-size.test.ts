@@ -1,6 +1,10 @@
 /**
  * Bundle size regression tests.
  * Ensures the main index bundle does NOT grow unbounded and engine splits are respected.
+ *
+ * After M3: engine re-exports were removed from src/index.ts — the main bundle
+ * now contains only the core FSM + handlers (no ethers, no viem).
+ * Consumers import engines from subpaths (engines/viem, engines/ethers-v6, etc.).
  */
 
 import { describe, expect, it } from 'vitest'
@@ -14,18 +18,15 @@ function bundleSize(name: string): number {
 }
 
 describe('bundle size', () => {
-  it('main index bundle is under 800KB (ethers v6 IS bundled — use engines/viem for lean path)', () => {
+  it('main index bundle is under 15KB (engines NOT bundled — use engine subpaths)', () => {
     const size = bundleSize('index.js')
-    // ethers v6 (~750KB) is bundled into the main entry because it's re-exported
-    // from src/index.ts. The lean path is 'multistep-multicall/engines/viem' (~8 KB).
-    // viem (~55KB) is also bundled. This test is a regression guard; a future
-    // ethers bump could push this past 800KB.
-    expect(size).toBeLessThan(800 * 1024)
+    // Engines are no longer re-exported from root. The main entry contains only
+    // runMultistepTasks, types, and handler exports. Should stay small.
+    expect(size).toBeLessThan(15 * 1024)
   })
 
   it('viem engine is the smallest engine (~8KB)', () => {
     const size = bundleSize('engines/viem.js')
-    // Viem executor: minimal wrapper, should be tiny
     expect(size).toBeLessThan(20 * 1024)
   })
 
@@ -35,11 +36,9 @@ describe('bundle size', () => {
     expect(ethersV6Size).toBeGreaterThan(viemSize)
   })
 
-  it('ethers-v5 dist file exists and is non-empty (external, not bundled)', () => {
-    // ethers-v5 is marked external in tsup config — it must exist as a separate file
+  it('ethers-v5 dist file exists and is non-empty (external, not bundled in main)', () => {
     const size = bundleSize('engines/ethers-v5.js')
     expect(size).toBeGreaterThan(0)
-    // ethers-v5 lib itself is ~900KB; the wrapper should be < 30KB
     expect(size).toBeLessThan(30 * 1024)
   })
 })

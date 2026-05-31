@@ -32,7 +32,7 @@ describe('resolveErc20Token', () => {
     mockExecutor.executeMulticall.mockResolvedValueOnce([
       { status: 'success', value: 'USDC' },
       { status: 'success', value: 6n },
-      { status: 'success', value: '1000000' },
+      { status: 'success', value: 1000000n },
     ] as RawResult[])
 
     const result = await resolveErc20Token({
@@ -62,11 +62,11 @@ describe('resolveErc20TokensBulk', () => {
       // Token 0
       { status: 'success', value: 'USDC' },
       { status: 'success', value: 6n },
-      { status: 'success', value: '1000000' },
+      { status: 'success', value: 1000000n },
       // Token 1
       { status: 'success', value: 'WETH' },
       { status: 'success', value: 18n },
-      { status: 'success', value: '2000000000000000000' },
+      { status: 'success', value: 2000000000000000000n },
     ] as RawResult[])
 
     const results = await resolveErc20TokensBulk({

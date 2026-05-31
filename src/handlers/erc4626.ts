@@ -52,7 +52,7 @@ export function buildErc4626Task(params: {
           { key: 'decimals', target: vault, abi: erc20Abi, functionName: 'decimals' },
           { key: 'asset', target: vault, abi: erc4626Abi, functionName: 'asset' },
         ]
-        if (hasOwner && owner) {
+        if (owner) {
           calls.push(
             {
               key: 'balance',
@@ -98,17 +98,18 @@ export function buildErc4626Task(params: {
 
     consumeStepResults(step, results: StepResult[]) {
       for (const result of results) {
+        if (result.status === 'failure') continue
         if (step === 1) {
           if (result.key === 'symbol') ctx.symbol = result.value as string
-          if (result.key === 'decimals') ctx.decimals = Number(result.value as bigint)
+          if (result.key === 'decimals') ctx.decimals = Number(result.value)
           if (result.key === 'asset') ctx.underlyingAsset = result.value as Address
           if (hasOwner) {
-            if (result.key === 'balance') ctx.balance = BigInt(result.value as string)
-            if (result.key === 'maxWithdraw') ctx.maxWithdraw = BigInt(result.value as string)
-            if (result.key === 'maxRedeem') ctx.maxRedeem = BigInt(result.value as string)
+            if (result.key === 'balance') ctx.balance = result.value as bigint
+            if (result.key === 'maxWithdraw') ctx.maxWithdraw = result.value as bigint
+            if (result.key === 'maxRedeem') ctx.maxRedeem = result.value as bigint
           }
         }
-        if (step === 2 && result.key === 'assets') ctx.assets = BigInt(result.value as string)
+        if (step === 2 && result.key === 'assets') ctx.assets = result.value as bigint
       }
     },
 

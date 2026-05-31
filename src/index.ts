@@ -1,7 +1,6 @@
 // Core orchestration
 export { runMultistepTasks } from './core/runMultistepTasks'
 export type { StepCall, StepResult, MultistepTask, StepExecutor, RawResult } from './core/types'
-export { MultistepTaskBase } from './core/MultistepTask'
 
 // ERC20 handler
 export { resolveErc20Token, resolveErc20TokensBulk } from './handlers/erc20'
@@ -11,12 +10,8 @@ export type { Erc20TokenResolution } from './handlers/erc20'
 export { resolveErc4626Vault, resolveErc4626VaultsBulk } from './handlers/erc4626'
 export type { Erc4626VaultResolution } from './handlers/erc4626'
 
-// Viem engine
-export { createResolver } from './engines/viem'
-export type { ResolverEngine } from './engines/viem'
-
-// Ethers v6 engine
-export { createResolver as createEthersV6Resolver } from './engines/ethers-v6'
-
-// Ethers v5 engine
-export { createResolver as createEthersV5Resolver } from './engines/ethers-v5'
+// Engines are NOT re-exported from root to keep the main bundle small.
+// Import from subpaths instead:
+//   import { createResolver } from '@halaprix/multistep-multicall/engines/viem'
+//   import { createResolver } from '@halaprix/multistep-multicall/engines/ethers-v6'
+//   import { createResolver } from '@halaprix/multistep-multicall/engines/ethers-v5'
