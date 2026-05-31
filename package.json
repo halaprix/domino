@@ -6,6 +6,9 @@
   "type": "module",
   "description": "Batched on-chain data resolution for sequential, state-dependent reads. FSM executor for Multicall3 — reduces N×M RPC calls to M multicalls.",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "homepage": "https://github.com/halaprix/multistep-multicall#readme",
   "bugs": {
     "url": "https://github.com/halaprix/multistep-multicall/issues"
