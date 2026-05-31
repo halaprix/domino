@@ -9,6 +9,9 @@
   "publishConfig": {
     "access": "public"
   },
+  "engines": {
+    "node": ">=18"
+  },
   "homepage": "https://github.com/halaprix/multistep-multicall#readme",
   "bugs": {
     "url": "https://github.com/halaprix/multistep-multicall/issues"
