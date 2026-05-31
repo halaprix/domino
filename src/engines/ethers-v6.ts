@@ -55,6 +55,20 @@ function createEthersV6Executor(mc3: ContractCls, iface: InterfaceCls): StepExec
   }
 }
 
+/**
+ * Create an ethers v6 ResolverEngine.
+ *
+ * @param provider - ethers v6 Provider
+ * @param multicall3Contract - optional pre-configured Multicall3 Contract
+ * @param abiInterface - optional ethers Interface
+ *
+ * @remarks
+ * **StepCall.abi limitation:** ethers executors encode calls via
+ * `iface.encodeFunctionData(call.functionName, …)` — they ignore `call.abi`.
+ * All function signatures used by your MultistepTasks must be present in
+ * the single shared `iface`. If you pass a custom `abiInterface`, include the
+ * full combined set of functions your tasks will call.
+ */
 export function createResolver(
   provider: import('ethers').Provider,
   multicall3Contract?: ContractCls,
