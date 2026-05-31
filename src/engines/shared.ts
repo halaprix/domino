@@ -7,9 +7,16 @@
  */
 
 import type { Address, StepCall, StepExecutor, RawResult } from '../core/types'
-import { runMultistepTasks } from '../core/runMultistepTasks'
-import { buildErc20Task, type Erc20TokenResolution } from '../handlers/erc20'
-import { buildErc4626Task, type Erc4626VaultResolution } from '../handlers/erc4626'
+import {
+  resolveErc20Token,
+  resolveErc20TokensBulk,
+  type Erc20TokenResolution,
+} from '../handlers/erc20'
+import {
+  resolveErc4626Vault,
+  resolveErc4626VaultsBulk,
+  type Erc4626VaultResolution,
+} from '../handlers/erc4626'
 
 export type { Erc20TokenResolution, Erc4626VaultResolution }
 
@@ -106,27 +113,25 @@ export function makeResolver<TAddr extends string = Address>(
 ): ResolverEngine<TAddr> {
   return {
     async resolveErc20({ token, owner }) {
-      const [result] = await runMultistepTasks(executor, [buildErc20Task(erc20Params(token, owner))])
-      return result!
+      return resolveErc20Token({ client: executor, ...erc20Params(token, owner) })
     },
 
     async resolveErc20Bulk({ entries }) {
-      if (entries.length === 0) return []
-      const tasks = entries.map((e) => buildErc20Task(erc20Params(e.token, e.owner)))
-      return runMultistepTasks(executor, tasks)
+      return resolveErc20TokensBulk({
+        client: executor,
+        entries: entries.map((e) => erc20Params(e.token, e.owner)),
+      })
     },
 
     async resolveErc4626({ vault, owner }) {
-      const [result] = await runMultistepTasks(executor, [
-        buildErc4626Task(erc4626Params(vault, owner)),
-      ])
-      return result!
+      return resolveErc4626Vault({ client: executor, ...erc4626Params(vault, owner) })
     },
 
     async resolveErc4626Bulk({ entries }) {
-      if (entries.length === 0) return []
-      const tasks = entries.map((e) => buildErc4626Task(erc4626Params(e.vault, e.owner)))
-      return runMultistepTasks(executor, tasks)
+      return resolveErc4626VaultsBulk({
+        client: executor,
+        entries: entries.map((e) => erc4626Params(e.vault, e.owner)),
+      })
     },
   }
 }
