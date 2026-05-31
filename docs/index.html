@@ -5,7 +5,8 @@
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <title>multistep-multicall - Batched on-chain reads</title>
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.9.0/dist/ethers.umd.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600;700&family=JetBrains+Mono:wght@400;600&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;family=JetBrains+Mono:wght@100..900&amp;display=swap" rel="stylesheet"/>
 <script id="tailwind-config">
@@ -145,7 +146,7 @@
             </p>
 <div class="flex flex-col sm:flex-row gap-sm justify-center items-center">
 <a class="px-6 py-3 bg-inverse-primary text-white rounded-md font-body-md text-body-md font-semibold glow-hover transition-all" href="#">Get started</a>
-<a class="px-6 py-3 border border-outline-variant hover:border-primary hover:text-primary text-on-surface rounded-md font-body-md text-body-md transition-all flex items-center gap-2" href="#">View on GitHub <span class="material-symbols-outlined text-[18px]">arrow_forward</span></a>
+<a class="px-6 py-3 border border-outline-variant hover:border-primary hover:text-primary text-on-surface rounded-md font-body-md text-body-md transition-all flex items-center gap-2" href="#demo"><span class="material-symbols-outlined text-[18px]">rocket_launch</span> Try the demo</a>
 </div>
 </section>
 <!-- Stats Bar -->
@@ -226,6 +227,367 @@
 <p class="font-body-md text-body-md text-on-surface-variant">Relies only on Multicall3 on-chain. Incredibly lightweight footprint.</p>
 </div>
 </div>
+</section>
+<section class="mb-xl" id="demo">
+<h2 class="font-headline-md text-headline-md text-white mb-sm">Interactive Demo</h2>
+<div class="code-container rounded-lg p-md relative" id="demo-container">
+<!-- Demo header with rocket icon -->
+<div class="flex items-center gap-2 mb-md">
+<span class="material-symbols-outlined text-primary text-2xl">rocket_launch</span>
+<span class="font-label-caps text-label-caps text-primary">LIVE ON-CHAIN</span>
+</div>
+
+<!-- Wallet connection state machine -->
+<div id="fsm-root">
+<!-- FSM states rendered by JS -->
+</div>
+
+<!-- Inline FSM + ABIs (self-contained until npm published) -->
+<script>
+(function() {
+'use strict';
+
+// ============================================================
+// ABIs (inline, matching src/abis/)
+// ============================================================
+const ERC20_ABI = [
+  { "type": "function", "name": "decimals", "stateMutability": "view", "inputs": [], "outputs": [{ "type": "uint8" }] },
+  { "type": "function", "name": "symbol", "stateMutability": "view", "inputs": [], "outputs": [{ "type": "string" }] },
+  { "type": "function", "name": "name", "stateMutability": "view", "inputs": [], "outputs": [{ "type": "string" }] }
+];
+
+const ERC4626_ABI = [
+  { "type": "function", "name": "asset", "stateMutability": "view", "inputs": [], "outputs": [{ "type": "address" }] },
+  { "type": "function", "name": "convertToShares", "stateMutability": "view", "inputs": [{ "type": "uint256", "name": "assets", "internalType": "uint256" }], "outputs": [{ "type": "uint256" }] },
+  { "type": "function", "name": "balanceOf", "stateMutability": "view", "inputs": [{ "type": "address", "name": "owner", "internalType": "address" }], "outputs": [{ "type": "uint256" }] }
+];
+
+const MULTICALL3_ABI = [
+  { "type": "function", "name": "aggregate3", "stateMutability": "payable", "inputs": [{ "type": "tuple[]", "name": "calls", "components": [{ "type": "address", "name": "target", "internalType": "address" }, { "type": "bytes", "name": "callData", "internalType": "bytes" }] }], "outputs": [{ "type": "tuple[]", "name": "results", "components": [{ "type": "bool", "name": "success", "internalType": "bool" }, { "type": "bytes", "name": "returnData", "internalType": "bytes" }] }] }
+];
+
+const MULTICALL3_ADDRESS = '0xcA11bde05977b3631167028862bE2a173976CA11';
+
+// ============================================================
+// FSM State Machine
+// ============================================================
+const FSM_STATES = {
+  DISCONNECTED: 'disconnected',
+  CONNECTING: 'connecting',
+  CONNECTED: 'connected',
+  DEMO_RUNNING: 'demo_running',
+  DEMO_SUCCESS: 'demo_success',
+  DEMO_ERROR: 'demo_error'
+};
+
+// ============================================================
+// Multicall3 Executor (inline FSM)
+// ============================================================
+class Multicall3Executor {
+  constructor(provider) {
+    this.provider = provider;
+    this.multicall = new ethers.Contract(MULTICALL3_ADDRESS, MULTICALL3_ABI, provider);
+  }
+
+  async executeMulticall(calls) {
+    const callsFormatted = calls.map(call => ({
+      target: call.target,
+      callData: encodeCall(call.functionName, call.abi, call.args || [])
+    }));
+
+    const results = await this.multicall.aggregate3.staticCall(callsFormatted);
+    return results.map((r, i) => ({
+      status: r.success ? 'success' : 'failure',
+      value: r.success ? decodeResult(results, calls[i], r.returnData) : null
+    }));
+  }
+}
+
+function encodeCall(functionName, abi, args) {
+  const iface = new ethers.Interface(abi);
+  return iface.encodeFunctionData(functionName, args);
+}
+
+function decodeResult(results, call, returnData) {
+  try {
+    const iface = new ethers.Interface([call]);
+    return iface.decodeFunctionResult(call.functionName, returnData);
+  } catch {
+    return null;
+  }
+}
+
+// ============================================================
+// Demo FSM
+// ============================================================
+let currentState = FSM_STATES.DISCONNECTED;
+let walletAddress = null;
+let executor = null;
+let currentStep = 0;
+let stepResults = [];
+let vaultAddress = null;
+let tokenAddress = null;
+
+async function connectWallet() {
+  setState(FSM_STATES.CONNECTING);
+  try {
+    if (!window.ethereum) {
+      throw new Error('No wallet detected. Please install MetaMask or another Web3 wallet.');
+    }
+    const provider = new ethers.BrowserProvider(window.ethereum);
+    await provider.send('eth_requestAccounts', []);
+    const signer = await provider.getSigner();
+    walletAddress = await signer.getAddress();
+    executor = new Multicall3Executor(provider);
+    setState(FSM_STATES.CONNECTED);
+  } catch (err) {
+    renderError('Wallet connection failed: ' + err.message);
+    setState(FSM_STATES.DISCONNECTED);
+  }
+}
+
+function disconnectWallet() {
+  walletAddress = null;
+  executor = null;
+  resetDemo();
+  setState(FSM_STATES.DISCONNECTED);
+}
+
+function resetDemo() {
+  currentStep = 0;
+  stepResults = [];
+  vaultAddress = null;
+  tokenAddress = null;
+}
+
+function setState(state) {
+  currentState = state;
+  render();
+}
+
+async function runDemo(vaultAddr) {
+  if (!executor) return;
+  resetDemo();
+  vaultAddress = vaultAddr;
+  setState(FSM_STATES.DEMO_RUNNING);
+
+  try {
+    // Step 1: Get vault asset (token address)
+    const step1Calls = [{
+      target: vaultAddr,
+      functionName: 'asset',
+      abi: ERC4626_ABI
+    }];
+
+    addStepLog('STEP 1', 'Fetching vault asset (token address)...', 'pending');
+    const step1Results = await executor.executeMulticall(step1Calls);
+
+    if (step1Results[0].status === 'failure') {
+      throw new Error('Step 1 failed: vault.asset() reverted');
+    }
+
+    tokenAddress = step1Results[0].value[0];
+    updateStepLog('STEP 1', `asset = ${tokenAddress}`, 'success');
+    stepResults.push({ step: 1, result: tokenAddress });
+
+    // Step 2: Get token decimals + symbol via Multicall3
+    const step2Calls = [
+      { target: tokenAddress, functionName: 'decimals', abi: ERC20_ABI },
+      { target: tokenAddress, functionName: 'symbol', abi: ERC20_ABI }
+    ];
+
+    addStepLog('STEP 2', `Fetching token info for ${tokenAddress}...`, 'pending');
+    const step2Results = await executor.executeMulticall(step2Calls);
+
+    if (step2Results[0].status === 'failure') {
+      throw new Error('Step 2 failed: ERC20 calls reverted');
+    }
+
+    const decimals = step2Results[0].value[0];
+    const symbol = step2Results[1].value[0];
+    updateStepLog('STEP 2', `decimals = ${decimals}, symbol = ${symbol}`, 'success');
+    stepResults.push({ step: 2, result: { decimals, symbol, tokenAddress } });
+
+    setState(FSM_STATES.DEMO_SUCCESS);
+  } catch (err) {
+    renderError('Demo failed: ' + err.message);
+    setState(FSM_STATES.CONNECTED);
+  }
+}
+
+// ============================================================
+// Rendering
+// ============================================================
+function render() {
+  const root = document.getElementById('fsm-root');
+  if (!root) return;
+
+  let html = '';
+
+  switch (currentState) {
+    case FSM_STATES.DISCONNECTED:
+      html = `
+        <div class="flex flex-col items-center gap-sm py-lg">
+          <div class="text-on-surface-variant text-center mb-sm">
+            Connect your wallet to run the live ERC4626 demo
+          </div>
+          <button onclick="window.demoFSM.connectWallet()" class="px-6 py-3 bg-inverse-primary text-white rounded-md font-body-md font-semibold glow-hover transition-all flex items-center gap-2">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>
+            Connect Wallet
+          </button>
+        </div>`;
+      break;
+
+    case FSM_STATES.CONNECTING:
+      html = `
+        <div class="flex flex-col items-center gap-sm py-lg">
+          <div class="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full"></div>
+          <div class="text-on-surface-variant">Connecting wallet...</div>
+        </div>`;
+      break;
+
+    case FSM_STATES.CONNECTED:
+    case FSM_STATES.DEMO_RUNNING:
+    case FSM_STATES.DEMO_SUCCESS:
+    case FSM_STATES.DEMO_ERROR:
+      const shortAddr = walletAddress ? walletAddress.slice(0, 6) + '...' + walletAddress.slice(-4) : '';
+      html = `
+        <div class="flex flex-col gap-md">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <div class="w-2 h-2 bg-green-500 rounded-full"></div>
+              <span class="font-label-caps text-label-caps text-on-surface-variant">${shortAddr}</span>
+            </div>
+            <button onclick="window.demoFSM.disconnectWallet()" class="text-on-surface-variant hover:text-error transition-colors font-label-caps text-label-caps">
+              Disconnect
+            </button>
+          </div>
+          ${renderDemoForm()}
+          ${renderStepLogs()}
+        </div>`;
+      break;
+  }
+
+  root.innerHTML = html;
+}
+
+function renderDemoForm() {
+  const isRunning = currentState === FSM_STATES.DEMO_RUNNING;
+  const isSuccess = currentState === FSM_STATES.DEMO_SUCCESS;
+
+  return `
+    <div class="space-y-sm">
+      <label class="block font-label-caps text-label-caps text-on-surface-variant">ERC4626 Vault Address</label>
+      <div class="flex gap-sm">
+        <input id="vault-input" type="text" placeholder="0x..." value="${vaultAddress || ''}" 
+          class="flex-1 bg-surface-container-high border border-outline-variant rounded px-3 py-2 text-on-surface font-code-block text-code-block focus:border-primary focus:outline-none" ${isRunning ? 'disabled' : ''} />
+        <button onclick="window.demoFSM.runDemo(document.getElementById('vault-input').value)" 
+          ${isRunning ? 'disabled' : ''} class="px-4 py-2 bg-primary text-on-primary rounded font-label-caps text-label-caps font-semibold hover:bg-primary/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+          ${isRunning ? 'Running...' : 'Run Demo'}
+        </button>
+      </div>
+      ${isSuccess ? renderSuccessCard() : ''}
+    </div>`;
+}
+
+function renderSuccessCard() {
+  const vaultResult = stepResults.find(s => s.step === 1);
+  const tokenResult = stepResults.find(s => s.step === 2);
+
+  return `
+    <div class="mt-sm p-sm bg-green-500/10 border border-green-500/30 rounded">
+      <div class="flex items-center gap-2 mb-xs">
+        <span class="material-symbols-outlined text-green-500 text-[16px]">check_circle</span>
+        <span class="font-label-caps text-label-caps text-green-500">DEMO COMPLETE</span>
+      </div>
+      <div class="space-y-xs font-code-block text-code-block text-on-surface">
+        <div><span class="text-on-surface-variant">Vault:</span> ${vaultAddress}</div>
+        <div><span class="text-on-surface-variant">Asset:</span> ${tokenResult?.result?.tokenAddress}</div>
+        <div><span class="text-on-surface-variant">Symbol:</span> ${tokenResult?.result?.symbol}</div>
+        <div><span class="text-on-surface-variant">Decimals:</span> ${tokenResult?.result?.decimals}</div>
+      </div>
+    </div>`;
+}
+
+function renderStepLogs() {
+  if (currentState === FSM_STATES.DISCONNECTED || currentState === FSM_STATES.CONNECTING) return '';
+
+  return `
+    <div class="space-y-xs" id="step-logs">
+      ${stepResults.length === 0 ? '<div class="text-on-surface-variant text-sm">Run the demo to see step-by-step execution...</div>' : ''}
+    </div>`;
+}
+
+function addStepLog(step, message, status) {
+  const logs = document.getElementById('step-logs');
+  if (!logs) return;
+
+  const id = `step-${step.toLowerCase().replace(/\s/g, '-')}`;
+  const existing = document.getElementById(id);
+
+  if (existing) {
+    existing.innerHTML = `
+      <div class="flex items-center gap-2">
+        <div class="w-4 h-4 border border-primary rounded-full flex items-center justify-center">
+          <div class="w-2 h-2 bg-primary rounded-full"></div>
+        </div>
+        <span class="font-label-caps text-label-caps text-primary">${step}</span>
+        <span class="text-on-surface-variant text-sm">${message}</span>
+      </div>`;
+    existing.className = 'p-xs bg-primary/5 border border-primary/20 rounded text-sm';
+  } else {
+    const el = document.createElement('div');
+    el.id = id;
+    el.className = 'p-xs bg-primary/5 border border-primary/20 rounded text-sm';
+    el.innerHTML = `
+      <div class="flex items-center gap-2">
+        <div class="animate-spin w-4 h-4 border border-primary border-t-transparent rounded-full"></div>
+        <span class="font-label-caps text-label-caps text-primary">${step}</span>
+        <span class="text-on-surface-variant text-sm">${message}</span>
+      </div>`;
+    logs.appendChild(el);
+  }
+}
+
+function updateStepLog(step, message, status) {
+  const id = `step-${step.toLowerCase().replace(/\s/g, '-')}`;
+  const el = document.getElementById(id);
+  if (!el) return;
+
+  const colorClass = status === 'success' ? 'text-green-500 border-green-500/20 bg-green-500/5' : 'text-error border-error/20 bg-error/5';
+  const icon = status === 'success' ? 'check' : 'close';
+
+  el.className = `p-xs border rounded text-sm ${colorClass}`;
+  el.innerHTML = `
+    <div class="flex items-center gap-2">
+      <span class="material-symbols-outlined text-[16px]">${icon}</span>
+      <span class="font-label-caps text-label-caps">${step}</span>
+      <span class="text-on-surface-variant text-sm">${message}</span>
+    </div>`;
+}
+
+function renderError(message) {
+  const logs = document.getElementById('step-logs');
+  if (logs) {
+    logs.innerHTML += `
+      <div class="p-xs border border-error/20 bg-error/5 rounded text-sm text-error">
+        <span class="material-symbols-outlined text-[16px] mr-1">error</span>
+        ${message}
+      </div>`;
+  }
+}
+
+// Expose to global for onclick handlers
+window.demoFSM = {
+  connectWallet,
+  disconnectWallet,
+  runDemo
+};
+
+// Initial render
+render();
+})();
+</script>
 </section>
 <!-- Quick Start -->
 <section class="mb-xl max-w-3xl mx-auto">
