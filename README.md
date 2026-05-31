@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/halaprix/multistep-multicall/actions/workflows/ci.yml/badge.svg)](https://github.com/halaprix/multistep-multicall/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/@halaprix/multistep-multicall)](https://www.npmjs.com/package/@halaprix/multistep-multicall)
-[![bundle size](https://img.shields.io/badge/gzip%20size-viem%3A%201.9KB-2.3KB-green)](https://www.npmjs.com/package/@halaprix/multistep-multicall)
+[![bundle size](https://img.shields.io/badge/main%20bundle-7.3KB-brightgreen)](https://www.npmjs.com/package/@halaprix/multistep-multicall)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5-blue)](https://www.typescriptlang.org/)
 [![MIT License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 

@@ -52,10 +52,10 @@ export async function runMultistepTasks<TResult>(
     const results = await executor.executeMulticall(calls)
 
     // Dev-time guard: a misbehaving executor that returns fewer results than calls
-    // would silently corrupt routing — fail loudly instead
+    // would silently corrupt routing : fail loudly instead
     if (results.length !== calls.length) {
       throw new Error(
-        `StepExecutor returned ${results.length} results for ${calls.length} calls — length mismatch`,
+        `StepExecutor returned ${results.length} results for ${calls.length} calls : length mismatch`,
       )
     }
 

@@ -4,7 +4,7 @@ import type { PublicClient } from 'viem'
 
 describe('viem engine', () => {
   it('resolves ERC20 symbol and decimals', async () => {
-    // viem multicall returns decoded values directly — single-output functions
+    // viem multicall returns decoded values directly : single-output functions
     // like symbol() come back as 'USDC', not ['USDC']
     const mockClient = {
       multicall: vi.fn().mockResolvedValue([

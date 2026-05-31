@@ -2,7 +2,7 @@
  * Bundle size regression tests.
  * Ensures the main index bundle does NOT grow unbounded and engine splits are respected.
  *
- * After M3: engine re-exports were removed from src/index.ts — the main bundle
+ * After M3: engine re-exports were removed from src/index.ts : the main bundle
  * now contains only the core FSM + handlers (no ethers, no viem).
  * Consumers import engines from subpaths (engines/viem, engines/ethers-v6, etc.).
  */
@@ -18,7 +18,7 @@ function bundleSize(name: string): number {
 }
 
 describe('bundle size', () => {
-  it('main index bundle is under 15KB (engines NOT bundled — use engine subpaths)', () => {
+  it('main index bundle is under 15KB (engines NOT bundled : use engine subpaths)', () => {
     const size = bundleSize('index.js')
     // Engines are no longer re-exported from root. The main entry contains only
     // runMultistepTasks, types, and handler exports. Should stay small.

@@ -17,7 +17,7 @@ export interface StepCall {
   abi: readonly unknown[]
   /** Function name to call. */
   functionName: string
-  /** Raw arguments — validated at viem call-site, not here. */
+  /** Raw arguments : validated at viem call-site, not here. */
   args?: readonly unknown[]
 }
 
@@ -30,13 +30,10 @@ export type Address = `0x${string}`
 export interface StepResult {
   key: string
   value: unknown
-  /** 'success' if the call reverted; undefined for successful calls. */
+  /** 'failure' if the call reverted; omitted when it succeeded. */
   status?: 'failure'
 }
 
-/**
- * A self-contained task that describes a multi-step data retrieval pipeline.
- */
 /**
  * Abstraction over the underlying multicall execution engine.
  * Allows pluggable backends: viem, ethers v5, ethers v6, etc.
@@ -53,6 +50,11 @@ export interface RawResult {
   value?: unknown
 }
 
+/**
+ * A self-contained task that describes a multi-step data retrieval pipeline.
+ * The task's buildStepCalls, consumeStepResults, and finalize are called
+ * by runMultistepTasks in step order.
+ */
 export interface MultistepTask<TResult> {
   /** Highest step index this task will use (1-based). */
   maxStep: number

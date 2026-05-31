@@ -1,5 +1,5 @@
 /**
- * Ethers v5 engine — implements StepExecutor via Multicall3 aggregate3.
+ * Ethers v5 engine : implements StepExecutor via Multicall3 aggregate3.
  */
 
 import { Contract, utils } from 'ethers-v5'
@@ -65,7 +65,7 @@ function createEthersV5Executor(mc3: Contract, iface: utils.Interface): StepExec
  *
  * @remarks
  * **StepCall.abi limitation:** ethers executors encode calls via
- * `iface.encodeFunctionData(call.functionName, …)` — they ignore `call.abi`.
+ * `iface.encodeFunctionData(call.functionName, …)` : they ignore `call.abi`.
  * All function signatures used by your MultistepTasks must be present in
  * the single shared `iface`. If you pass a custom `iface`, include the
  * full combined set of functions your tasks will call.

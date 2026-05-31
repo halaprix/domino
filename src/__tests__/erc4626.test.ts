@@ -19,7 +19,7 @@ const vault = '0x7f39c5812d3f46fCEa82257f5aE43fF59E7E9F8a'
 const owner = '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045'
 
 describe('resolveErc4626Vault', () => {
-  it('resolves metadata only (no owner) — single multicall, 3 calls', async () => {
+  it('resolves metadata only (no owner) : single multicall, 3 calls', async () => {
     const executor = mockExecutor([
       [
         { status: 'success', value: 'wstETH' },
@@ -43,7 +43,7 @@ describe('resolveErc4626Vault', () => {
     expect(result.position).toBeUndefined()
   })
 
-  it('resolves metadata + position with owner — two multicalls (FSM step-gating)', async () => {
+  it('resolves metadata + position with owner : two multicalls (FSM step-gating)', async () => {
     const executor = mockExecutor([
       // Step 1: symbol, decimals, asset, balanceOf, maxWithdraw, maxRedeem
       [
@@ -54,7 +54,7 @@ describe('resolveErc4626Vault', () => {
         { status: 'success', value: 1000000000000000000n },
         { status: 'success', value: 1000000000000000000n },
       ],
-      // Step 2: convertToAssets(balance) — uses value from Step 1
+      // Step 2: convertToAssets(balance) : uses value from Step 1
       [
         { status: 'success', value: 501234567890123456n },
       ],
@@ -81,7 +81,7 @@ describe('resolveErc4626Vault', () => {
     expect(result.position?.assets).toBe(501234567890123456n)
   })
 
-  it('skips step 2 when balance call fails — single multicall despite owner', async () => {
+  it('skips step 2 when balance call fails : single multicall despite owner', async () => {
     const executor = mockExecutor([
       // Step 1: balance call fails → step 2 should be skipped
       [
@@ -96,7 +96,7 @@ describe('resolveErc4626Vault', () => {
 
     const result = await resolveErc4626Vault({ client: executor, vault, owner })
 
-    // Only 1 multicall — step 2 was skipped because balanceOf failed
+    // Only 1 multicall : step 2 was skipped because balanceOf failed
     expect(executor.executeMulticall).toHaveBeenCalledTimes(1)
     expect(result.position?.balance).toBeUndefined()
     expect(result.position?.assets).toBeUndefined()

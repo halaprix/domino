@@ -1,5 +1,5 @@
 /**
- * ERC20 handler — framework-agnostic task builder + convenience functions.
+ * ERC20 handler : framework-agnostic task builder + convenience functions.
  *
  * Builds a MultistepTask that resolves ERC20 token metadata (symbol, decimals)
  * and optionally an owner's balance.
