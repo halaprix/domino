@@ -10,13 +10,7 @@
 
 import type { Address, MultistepTask, StepCall, StepResult, StepExecutor } from '../core/types'
 import { runMultistepTasks } from '../core/runMultistepTasks'
-
-/** Minimal ERC20 ABI — only the functions used by buildErc20Task. */
-const erc20Abi = [
-  'function symbol() view returns (string)',
-  'function decimals() view returns (uint8)',
-  'function balanceOf(address) view returns (uint256)',
-] as const
+import { erc20Abi } from '../abis/erc'
 
 export interface Erc20TokenResolution {
   symbol: string | undefined

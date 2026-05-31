@@ -4,6 +4,7 @@
 
 import { Contract, utils } from 'ethers-v5'
 import { MULTICALL3_ADDRESS, multicall3Abi } from '../abis/multicall3'
+import { ercCombinedAbi } from '../abis/erc'
 import type { StepExecutor, StepCall, RawResult } from '../core/types'
 import { runMultistepTasks } from '../core/runMultistepTasks'
 import { buildErc20Task, type Erc20TokenResolution } from '../handlers/erc20'
@@ -61,18 +62,7 @@ export function createResolver(
 
   const abiInterface =
     iface ??
-    new utils.Interface([
-      'function symbol() view returns (string)',
-      'function decimals() view returns (uint8)',
-      'function name() view returns (string)',
-      'function balanceOf(address) view returns (uint256)',
-      'function asset() view returns (address)',
-      'function convertToAssets(uint256) view returns (uint256)',
-      'function totalAssets() view returns (uint256)',
-      'function maxDeposit(address) view returns (uint256)',
-      'function maxWithdraw(address) view returns (uint256)',
-      'function maxRedeem(address) view returns (uint256)',
-    ])
+    new utils.Interface(ercCombinedAbi as unknown as string[])
 
   const executor = createEthersV5Executor(mc3, abiInterface)
 

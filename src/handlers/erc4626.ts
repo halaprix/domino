@@ -11,21 +11,7 @@
 
 import type { Address, MultistepTask, StepCall, StepResult, StepExecutor } from '../core/types'
 import { runMultistepTasks } from '../core/runMultistepTasks'
-
-/** Minimal ERC20 ABI — only the functions used for vault metadata + balance. */
-const erc20Abi = [
-  'function symbol() view returns (string)',
-  'function decimals() view returns (uint8)',
-  'function balanceOf(address) view returns (uint256)',
-] as const
-
-/** Minimal ERC4626 ABI — only the functions used by buildErc4626Task. */
-const erc4626Abi = [
-  'function asset() view returns (address)',
-  'function maxWithdraw(address) view returns (uint256)',
-  'function maxRedeem(address) view returns (uint256)',
-  'function convertToAssets(uint256) view returns (uint256)',
-] as const
+import { erc20Abi, erc4626Abi } from '../abis/erc'
 
 export interface Erc4626VaultResolution {
   metadata: {

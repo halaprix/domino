@@ -3,7 +3,8 @@
  */
 
 import { Contract as ContractCls, Interface as InterfaceCls } from 'ethers'
-import { erc20Abi, erc4626Abi, type Address } from 'viem'
+import type { Address } from 'viem'
+import { ercCombinedAbi } from '../abis/erc'
 import { MULTICALL3_ADDRESS, multicall3Abi } from '../abis/multicall3'
 import type { StepExecutor, StepCall, RawResult } from '../core/types'
 import { runMultistepTasks } from '../core/runMultistepTasks'
@@ -60,7 +61,7 @@ export function createResolver(
   abiInterface?: InterfaceCls,
 ): ResolverEngine {
   const mc3 = multicall3Contract ?? new ContractCls(MULTICALL3_ADDRESS, multicall3Abi, provider)
-  const iface: InterfaceCls = abiInterface ?? new InterfaceCls([...erc20Abi, ...erc4626Abi])
+  const iface: InterfaceCls = abiInterface ?? new InterfaceCls(ercCombinedAbi)
 
   const executor = createEthersV6Executor(mc3, iface)
 
