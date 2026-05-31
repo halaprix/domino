@@ -4,6 +4,7 @@
   "private": false,
   "files": ["dist", "README.md", "LICENSE"],
   "type": "module",
+  "sideEffects": false,
   "description": "Batched on-chain data resolution for sequential, state-dependent reads. FSM executor for Multicall3 — reduces N×M RPC calls to M multicalls.",
   "license": "MIT",
   "publishConfig": {
