@@ -20,6 +20,7 @@ describe("resolveErc20Token", () => {
     const result = await resolveErc20Token({
       client: mockClient,
       token: "0xA0b86991c6218b36c1d19D4a2e9Eb004C35d5Cc4",
+      owner: undefined,
     });
 
     expect(result.symbol).toBe("USDC");
