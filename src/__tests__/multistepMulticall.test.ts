@@ -237,4 +237,118 @@ describe('runMultistepTasks', () => {
     expect(result!.symbol).toBeUndefined()
     expect(result!.decimals).toBe(6)
   })
+
+  it("batches large call sets into sequential batches and reassembles in order", async () => {
+    const callLog: { keys: string[] }[] = []
+
+    const mockExecutor: StepExecutor = {
+      async executeMulticall(calls: StepCall[]): Promise<any[]> {
+        callLog.push({ keys: calls.map((c) => c.key) })
+        return calls.map((c) => {
+  if (c.key.endsWith('-decimals')) return { status: 'success' as const, value: 6 }
+  if (c.key.endsWith('-balance')) return { status: 'success' as const, value: 1000n }
+  return { status: 'success' as const, value: 'TOK' + c.key.charAt(1) }
+})
+      },
+    }
+
+    // 5 tokens x 3 calls = 15 calls, batchSize=4 -> 4+4+4+3 = 4 batches.
+    // Batch 0 (indices 0-3): t0-sym, t0-dec, t0-bal, t1-sym
+    // Batch 1 (indices 4-7): t1-dec, t1-bal, t2-sym, t2-dec
+    // Batch 2 (indices 8-11): t2-bal, t3-sym, t3-dec, t3-bal
+    // Batch 3 (indices 12-14): t4-sym, t4-dec, t4-bal
+    const tasks: MultistepTask<{ symbol: string; decimals: number; balance: bigint }>[] = []
+    for (let ti = 0; ti < 5; ti++) {
+      const capturedTi = ti
+      const ctx: { symbol?: string; decimals?: number; balance?: bigint } = {}
+      tasks.push({
+        maxStep: 1,
+        buildStepCalls(step) {
+          if (step !== 1) return []
+          return [
+            { key: 't' + capturedTi + '-symbol', target: '0xA0b86991c6218b36c1d19D4a2e9Eb004C35d5Cc4', abi: [], functionName: 'symbol' },
+            { key: 't' + capturedTi + '-decimals', target: '0xA0b86991c6218b36c1d19D4a2e9Eb004C35d5Cc4', abi: [], functionName: 'decimals' },
+            { key: 't' + capturedTi + '-balance', target: '0xA0b86991c6218b36c1d19D4a2e9Eb004C35d5Cc4', abi: [], functionName: 'balanceOf' },
+          ]
+        },
+        consumeStepResults(_step, results) {
+          for (const r of results) {
+            if (r.key === 't' + capturedTi + '-symbol') ctx.symbol = r.value as string
+            if (r.key === 't' + capturedTi + '-decimals') ctx.decimals = Number(r.value)
+            if (r.key === 't' + capturedTi + '-balance') ctx.balance = r.value as bigint
+          }
+        },
+        finalize() {
+          return { symbol: ctx.symbol ?? '', decimals: ctx.decimals ?? 0, balance: ctx.balance ?? 0n }
+        },
+      })
+    }
+
+    const results = await runMultistepTasks(mockExecutor, tasks, { batchSize: 4 })
+
+    // Verify 4 batches with correct call indices
+    expect(callLog).toHaveLength(4)
+    expect(callLog[0]!.keys).toEqual(['t0-symbol', 't0-decimals', 't0-balance', 't1-symbol'])
+    expect(callLog[1]!.keys).toEqual(['t1-decimals', 't1-balance', 't2-symbol', 't2-decimals'])
+    expect(callLog[2]!.keys).toEqual(['t2-balance', 't3-symbol', 't3-decimals', 't3-balance'])
+    expect(callLog[3]!.keys).toEqual(['t4-symbol', 't4-decimals', 't4-balance'])
+
+    // Each task received its 3 results regardless of which batch delivered them
+    for (let i = 0; i < 5; i++) {
+      expect(results[i]).toEqual({ symbol: 'TOK' + i, decimals: 6, balance: 1000n })
+    }
+  })
+
+  it("uses default batchSize of 100 when options is omitted", async () => {
+    const callLog: { count: number }[] = []
+
+    const mockExecutor: StepExecutor = {
+      async executeMulticall(calls: StepCall[]): Promise<any[]> {
+        callLog.push({ count: calls.length })
+        return calls.map(() => ({ status: 'success' as const, value: 'x' }))
+      },
+    }
+
+    // 100 calls should fit in 1 batch with the default
+    const tasks: MultistepTask<{}>[] = Array.from({ length: 100 }, (_, i) => ({
+      maxStep: 1,
+      buildStepCalls(step) {
+        if (step !== 1) return []
+        return [{ key: 'k' + i, target: '0xA0b86991c6218b36c1d19D4a2e9Eb004C35d5Cc4', abi: [], functionName: 'symbol' }]
+      },
+      consumeStepResults() {},
+      finalize() { return {} },
+    }))
+
+    await runMultistepTasks(mockExecutor, tasks) // no options
+
+    expect(callLog).toHaveLength(1)
+    expect(callLog[0]!.count).toBe(100)
+  })
+
+  it("throws when executor returns wrong number of results for a batch", async () => {
+    const mockExecutor: StepExecutor = {
+      async executeMulticall(calls: StepCall[]): Promise<any[]> {
+        // Return one too few per batch
+        return calls.slice(0, calls.length - 1).map(() => ({ status: 'success' as const, value: 'x' }))
+      },
+    }
+
+    const task: MultistepTask<{}> = {
+      maxStep: 1,
+      buildStepCalls(step) {
+        if (step !== 1) return []
+        return [
+          { key: 'a', target: '0xA0b86991c6218b36c1d19D4a2e9Eb004C35d5Cc4', abi: [], functionName: 'symbol' },
+          { key: 'b', target: '0xA0b86991c6218b36c1d19D4a2e9Eb004C35d5Cc4', abi: [], functionName: 'decimals' },
+        ]
+      },
+      consumeStepResults() {},
+      finalize() { return {} },
+    }
+
+    await expect(runMultistepTasks(mockExecutor, [task])).rejects.toThrow(
+      'StepExecutor returned 1 results for 2 calls — length mismatch',
+    )
+  })
 })
