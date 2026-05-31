@@ -14,9 +14,12 @@ function bundleSize(name: string): number {
 }
 
 describe('bundle size', () => {
-  it('main index bundle is under 800KB (ethers NOT bundled)', () => {
+  it('main index bundle is under 800KB (ethers v6 IS bundled — use engines/viem for lean path)', () => {
     const size = bundleSize('index.js')
-    // ethers = ~750KB; viem ~55KB. If ethers leaks in, this blows past 800KB.
+    // ethers v6 (~750KB) is bundled into the main entry because it's re-exported
+    // from src/index.ts. The lean path is 'multistep-multicall/engines/viem' (~8 KB).
+    // viem (~55KB) is also bundled. This test is a regression guard; a future
+    // ethers bump could push this past 800KB.
     expect(size).toBeLessThan(800 * 1024)
   })
 
