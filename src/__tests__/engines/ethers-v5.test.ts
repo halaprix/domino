@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { createResolver } from '../../engines/ethers-v5'
-import type { Contract, Interface } from 'ethers'
+import type { Contract, utils } from 'ethers-v5'
 
 describe('ethers v5 engine', () => {
   it('resolves ERC20 symbol and decimals', async () => {
@@ -11,7 +11,7 @@ describe('ethers v5 engine', () => {
         .fn()
         .mockReturnValueOnce(['USDC'] as unknown)
         .mockReturnValueOnce([6] as unknown),
-    } as unknown as Interface
+    } as unknown as utils.Interface
 
     const mockContract = {
       aggregate3: vi.fn().mockResolvedValue([
@@ -50,7 +50,7 @@ describe('ethers v5 engine', () => {
         .mockReturnValueOnce([1000000n] as unknown)
         .mockReturnValueOnce([1000000n] as unknown)
         .mockReturnValueOnce([900000n] as unknown),
-    } as unknown as Interface
+    } as unknown as utils.Interface
 
     const mockContract = {
       aggregate3: vi
@@ -116,7 +116,7 @@ describe('ethers v5 engine', () => {
         .mockReturnValueOnce([6] as unknown)
         .mockReturnValueOnce(['DAI'] as unknown)
         .mockReturnValueOnce([18] as unknown),
-    } as unknown as Interface
+    } as unknown as utils.Interface
 
     const mockContract = {
       aggregate3: vi.fn().mockResolvedValue([
@@ -163,7 +163,7 @@ describe('ethers v5 engine', () => {
     const mockInterface = {
       encodeFunctionData: vi.fn().mockReturnValue('0x'),
       decodeFunctionResult: vi.fn(),
-    } as unknown as Interface
+    } as unknown as utils.Interface
 
     const mockContract = {
       aggregate3: vi.fn().mockResolvedValue([
@@ -184,7 +184,7 @@ describe('ethers v5 engine', () => {
   })
 
   it('returns empty array for empty bulk', async () => {
-    const mockInterface = {} as unknown as Interface
+    const mockInterface = {} as unknown as utils.Interface
     const mockContract = {} as unknown as Contract
 
     const mockProvider = {} as import('ethers-v5').providers.Provider

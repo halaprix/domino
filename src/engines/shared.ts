@@ -48,11 +48,20 @@ export function createEncodedExecutor(
 ): StepExecutor {
   return {
     async executeMulticall(calls: StepCall[]): Promise<RawResult[]> {
-      const encoded = calls.map((call) => ({
-        target: call.target,
-        allowFailure: true,
-        callData: iface.encodeFunctionData(call.functionName, call.args ?? []),
-      }))
+      const encoded = calls.map((call) => {
+        let callData = '0x'
+        try {
+          callData = iface.encodeFunctionData(call.functionName, call.args ?? [])
+        } catch {
+          // If a custom task provides bad args, fail gracefully by sending 0x
+          // which will revert on-chain and route back as a per-call failure.
+        }
+        return {
+          target: call.target,
+          allowFailure: true,
+          callData,
+        }
+      })
 
       const results = await mc3.aggregate3(encoded)
 

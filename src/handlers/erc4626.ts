@@ -21,7 +21,7 @@ export interface Erc4626VaultResolution {
     maxWithdraw: bigint | undefined
     maxRedeem: bigint | undefined
   }
-  position: { balance: bigint; assets: bigint } | undefined
+  position: { balance: bigint; assets: bigint | undefined } | undefined
 }
 
 type Erc4626Context = {
@@ -123,7 +123,7 @@ export function buildErc4626Task(params: {
           maxRedeem: ctx.maxRedeem,
         },
         position:
-          hasOwner && ctx.balance !== undefined && ctx.assets !== undefined
+          hasOwner && ctx.balance !== undefined
             ? { balance: ctx.balance, assets: ctx.assets }
             : undefined,
       }

@@ -61,7 +61,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint src",
-    "lint:fix": "eslint src --fix"
+    "lint:fix": "eslint src --fix",
+    "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
     "ethers": "^5.0.0 || ^6.0.0",
