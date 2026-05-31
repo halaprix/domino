@@ -81,24 +81,24 @@ describe('resolveErc4626Vault', () => {
     expect(result.position?.assets).toBe(501234567890123456n)
   })
 
-  it('skips step 2 when balance is zero — single multicall despite owner', async () => {
+  it('skips step 2 when balance call fails — single multicall despite owner', async () => {
     const executor = mockExecutor([
-      // Step 1: balance = 0n → step 2 should be skipped
+      // Step 1: balance call fails → step 2 should be skipped
       [
         { status: 'success', value: 'wstETH' },
         { status: 'success', value: 18n },
         { status: 'success', value: '0xae7ab96520de3a18e5e111b5eaab095312d7fe84' },
-        { status: 'success', value: 0n },
-        { status: 'success', value: 0n },
-        { status: 'success', value: 0n },
+        { status: 'failure', value: undefined },
+        { status: 'failure', value: undefined },
+        { status: 'failure', value: undefined },
       ],
     ])
 
     const result = await resolveErc4626Vault({ client: executor, vault, owner })
 
-    // Only 1 multicall — step 2 was skipped because balance is 0
+    // Only 1 multicall — step 2 was skipped because balanceOf failed
     expect(executor.executeMulticall).toHaveBeenCalledTimes(1)
-    expect(result.position?.balance).toBe(0n)
+    expect(result.position?.balance).toBeUndefined()
     expect(result.position?.assets).toBeUndefined()
   })
 })
