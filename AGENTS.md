@@ -34,22 +34,19 @@
 src/
 ├── core/
 │   ├── runMultistepTasks.ts   # FSM executor (framework-agnostic)
-│   ├── types.ts               # StepCall, StepResult, MultistepTask, StepExecutor
-│   ├── adapters.ts            # Adapter exports
-│   └── MultistepTask.ts       # (may be unused, check before editing)
+│   └── types.ts               # StepCall, StepResult, RawResult, StepExecutor, MultistepTask
 ├── engines/
-│   ├── viem.ts        # ViemExecutor using viem's built-in multicall3
-│   ├── ethers-v6.ts   # Ethers v6 executor via Multicall3 aggregate3
-│   └── ethers-v5.ts   # Ethers v5 executor via Multicall3 aggregate3
+│   ├── viem.ts        # viem PublicClient.multicall
+│   ├── ethers-v6.ts   # Ethers v6 via Multicall3 aggregate3
+│   └── ethers-v5.ts   # Ethers v5 via Multicall3 aggregate3
 ├── handlers/
-│   ├── erc20-task.ts    # buildErc20Task() — MultistepTask factory
-│   ├── erc4626-task.ts  # buildErc4626Task() — MultistepTask factory
-│   ├── erc20.ts         # resolveErc20Token() / resolveErc20TokensBulk()
-│   ├── erc4626.ts       # resolveErc4626Vault() / resolveErc4626VaultsBulk()
-│   └── index.ts         # Handler exports
+│   ├── erc20.ts       # buildErc20Task() + resolveErc20Token() / resolveErc20TokensBulk()
+│   └── erc4626.ts     # buildErc4626Task() + resolveErc4626Vault() / resolveErc4626VaultsBulk()
 ├── abis/
-│   └── multicall3.ts    # Multicall3 ABI + address
-└── index.ts             # Public API surface
+│   ├── erc.ts         # ERC20 / ERC4626 JSON ABI fragments (shared by every engine)
+│   └── multicall3.ts  # Multicall3 ABI + address
+├── __tests__/         # vitest specs mirroring the source tree
+└── index.ts           # Public API surface
 ```
 
 ## Core Interfaces
@@ -57,17 +54,25 @@ src/
 ```typescript
 // A single call to encode and send
 interface StepCall {
-  key: string;            // used to route results back to task
-  target: Address;        // contract address
-  abi: Abi;              // ABI fragment (viem)
+  key: string;                 // routes results back to the task
+  target: `0x${string}`;       // contract address
+  abi: readonly unknown[];     // JSON ABI — used by the viem engine; ethers engines
+                               // ignore this and encode via a shared Interface
   functionName: string;
-  args?: unknown[];
+  args?: readonly unknown[];
 }
 
-// Result of a single call
+// Result of a single call, after routing to its task
 interface StepResult {
   key: string;
   value: unknown;
+  status?: 'failure';          // present only when the call reverted/failed
+}
+
+// Raw result returned by an executor, before routing
+interface RawResult {
+  status: 'success' | 'failure';
+  value?: unknown;
 }
 
 // Framework-agnostic multicall executor
@@ -89,7 +94,7 @@ interface MultistepTask<TResult> {
 ### Viem (primary, recommended)
 ```typescript
 import { createPublicClient, http } from "viem";
-import { createResolver } from "multistep-multicall/engines/viem";
+import { createResolver } from "@halaprix/multistep-multicall/engines/viem";
 
 const client = createPublicClient({ chain: mainnet, transport: http() });
 const resolver = createResolver(client);
@@ -101,13 +106,13 @@ const tokens = await resolver.resolveErc20Bulk({ entries: [{ token: "0x..." }, .
 
 ### Ethers v6
 ```typescript
-import { createResolver } from "multistep-multicall/engines/ethers-v6";
+import { createResolver } from "@halaprix/multistep-multicall/engines/ethers-v6";
 const resolver = createResolver(ethersProvider);
 ```
 
 ### Ethers v5
 ```typescript
-import { createResolver } from "multistep-multicall/engines/ethers-v5";
+import { createResolver } from "@halaprix/multistep-multicall/engines/ethers-v5";
 const resolver = createResolver(ethersProvider);
 ```
 
@@ -128,11 +133,13 @@ npm run build     # ensure typecheck + build succeeds
 ## Testing Patterns
 
 - Tests live in `src/__tests__/` mirroring the source tree.
-- Engine tests use a mock Multicall3 contract (anvil's pre-deployed instance on `0xcA11bde05977b3631167028862bE2a173976CA11`).
-- Use `test-viem.mjs` / `test-viem.cjs` for quick ad-hoc integration checks against a live node.
+- Handler/FSM tests mock the `StepExecutor` (`executeMulticall`) so result routing and step-gating run for real against fake data.
+- Engine unit tests mock the transport boundary — `client.multicall` (viem) or the ethers `Interface` — so they do **not** exercise real ABI encoding.
+- `src/__tests__/engines/integration.test.ts` closes that gap: it drives a real viem `PublicClient` (stub transport) and a real ethers `Interface`, exercising actual encode/decode. Add coverage here when changing ABIs or the executors.
 
 ## Key Constraints
 
 - **Never use `client.multicall` directly in handler code** — always go through `runMultistepTasks` + `StepExecutor`. This ensures consistent FSM behavior across engines.
-- When adding a new token standard (e.g. ERC-721), create a new `src/handlers/<name>-task.ts` + `src/handlers/<name>.ts` pair, following the ERC20/ERC4626 pattern.
-- All engines must produce identical result shapes for the same inputs — test against at least two engines where possible.
+- ABIs live in `src/abis/erc.ts` as **JSON ABI objects** (not human-readable strings) — viem's encoder requires parsed ABI; ethers accepts the same JSON.
+- When adding a new token standard (e.g. ERC-721), add a `src/handlers/<name>.ts` exporting both a `build<Name>Task()` factory and `resolve<Name>()` convenience functions, following the ERC20/ERC4626 pattern.
+- All engines must produce identical result shapes for the same inputs — covered by `integration.test.ts`; extend it for new engines/standards.

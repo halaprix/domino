@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/halaprix/multistep-multicall/actions/workflows/ci.yml/badge.svg)](https://github.com/halaprix/multistep-multicall/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/@halaprix/multistep-multicall)](https://www.npmjs.com/package/@halaprix/multistep-multicall)
-[![bundle size](https://img.shields.io/badge/main%20bundle-7.3KB-brightgreen)](https://www.npmjs.com/package/@halaprix/multistep-multicall)
+[![bundle size](https://img.shields.io/badge/gzip-1.8%E2%80%932.4KB-brightgreen)](https://www.npmjs.com/package/@halaprix/multistep-multicall)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5-blue)](https://www.typescriptlang.org/)
 [![MIT License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -36,7 +36,7 @@ You either make N×M sequential RPC calls, or you give up and make fewer calls t
 
 ```typescript
 import { createPublicClient, http, mainnet } from "viem";
-import { createResolver } from "multistep-multicall/engines/viem";
+import { createResolver } from "@halaprix/multistep-multicall/engines/viem";
 
 const client = createPublicClient({
   chain: mainnet,
@@ -73,7 +73,7 @@ const vaults = await resolver.resolveErc4626Bulk({
 
 ```typescript
 import { BrowserProvider } from "ethers";
-import { createResolver } from "multistep-multicall/engines/ethers-v6";
+import { createResolver } from "@halaprix/multistep-multicall/engines/ethers-v6";
 
 const provider = new BrowserProvider(window.ethereum);
 const resolver = createResolver(provider); // same API as viem version
@@ -83,9 +83,11 @@ const token = await resolver.resolveErc20({ token: "0xA0b86991c6218b36c1d19D4a2e
 
 ### ethers v5
 
+For the v5 engine, install ethers v5 (`npm install ethers@^5`) — the engine imports from `ethers`.
+
 ```typescript
-import { providers } from "ethers-v5";
-import { createResolver } from "multistep-multicall/engines/ethers-v5";
+import { providers } from "ethers";
+import { createResolver } from "@halaprix/multistep-multicall/engines/ethers-v5";
 
 const provider = new providers.Web3Provider(window.ethereum);
 const resolver = createResolver(provider); // same API
@@ -155,7 +157,7 @@ The FSM runs through all tasks step-by-step:
 Pick one at import time. The other two engines are eliminated by tree-shaking.
 
 ```typescript
-import { createResolver } from "multistep-multicall/engines/viem";
+import { createResolver } from "@halaprix/multistep-multicall/engines/viem";
 // or "multistep-multicall/engines/ethers-v6"
 ```
 
@@ -172,16 +174,24 @@ interface ResolverEngine {
 
 ### Layer 2 — Direct handler API (framework-agnostic)
 
-If you already have a `StepExecutor` or a viem `PublicClient`, use the handlers directly:
+The handlers run against any `StepExecutor` — the same one-method interface the
+engines implement. Use this when you want a custom backend (a test double, a
+batching proxy, a non-standard multicall). The `client` field is a `StepExecutor`,
+**not** a viem `PublicClient` — for viem/ethers, use the engine entry points
+(Layer 1), which build the executor for you.
 
 ```typescript
-import { resolveErc4626Vault } from "multistep-multicall";
-import { createPublicClient, http } from "viem";
+import { resolveErc4626Vault } from "@halaprix/multistep-multicall";
+import type { StepExecutor } from "@halaprix/multistep-multicall";
 
-const client = createPublicClient({ chain: mainnet, transport: http() });
+const executor: StepExecutor = {
+  async executeMulticall(calls) {
+    // Execute `calls` however you like; return one RawResult per call, in order.
+    return calls.map(() => ({ status: "success", value: /* decoded value */ undefined }));
+  },
+};
 
-// Pass PublicClient directly — handler wraps it in ViemExecutor
-const vault = await resolveErc4626Vault({ client, vault: "0x...", owner: "0x..." });
+const vault = await resolveErc4626Vault({ client: executor, vault: "0x...", owner: "0x..." });
 ```
 
 Both layers share the same return types.
@@ -215,24 +225,23 @@ interface Erc4626VaultResolution {
 
 ---
 
-## Tree-shaking
+## Bundle size
 
-Importing from a specific engine entry point excludes the other two:
+Each engine entry point is a thin wrapper. The library you choose (viem or ethers)
+is a peer dependency you already have, so it is **not** bundled. Importing one
+engine excludes the other two.
 
 ```typescript
-// Only viem lands in your bundle (~12KB)
-import { createResolver } from "multistep-multicall/engines/viem";
-
-// Only ethers v6 (~20KB)
-import { createResolver } from "multistep-multicall/engines/ethers-v6";
+import { createResolver } from "@halaprix/multistep-multicall/engines/viem";
+// ethers v5/v6 are not pulled in
 ```
 
-| Entry point | Min+gzipped | Notes |
+| Entry point | Wrapper (gzip) | Peer dependency (not bundled) |
 |---|---|---|
-| `.../engines/viem` | ~12KB | No ethers |
-| `.../engines/ethers-v6` | ~20KB | No viem |
-| `.../engines/ethers-v5` | ~22KB | No viem |
-| `...` (root) | ~35KB | All engines |
+| `.../engines/viem` | ~2.1 KB | viem |
+| `.../engines/ethers-v6` | ~2.3 KB | ethers v6 |
+| `.../engines/ethers-v5` | ~2.4 KB | ethers v5 |
+| `...` (root handlers, no engine) | ~1.8 KB | none |
 
 ---
 
@@ -245,7 +254,7 @@ import { createResolver } from "multistep-multicall/engines/ethers-v6";
 | Bulk N vaults | ✅ (O(steps)) | ✅ (O(N)) | ✅ (O(N)) |
 | Ethers v5 support | ✅ | ❌ | ❌ |
 | Framework-agnostic core | ✅ | ❌ | ❌ |
-| Bundle size (viem only) | ~12KB | ~40KB+ | 0 (no dep) |
+| Wrapper size, viem (gzip) | ~2.1KB | ~40KB+ | 0 (no dep) |
 
 ---
 
