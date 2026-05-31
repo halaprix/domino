@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { runMultistepTasks } from '../core/runMultistepTasks'
 import type { MultistepTask, StepCall, StepResult, StepExecutor } from '../core/types'
 
@@ -12,6 +12,10 @@ describe('runMultistepTasks', () => {
         ]
       },
     }
+
+    // Capture values in consumeStepResults so finalize derives from them —
+    // validates that result routing actually works (not just hardcoded return)
+    const ctx: { symbol?: string; decimals?: number } = {}
 
     const task: MultistepTask<{ symbol: string; decimals: number }> = {
       maxStep: 1,
@@ -33,29 +37,37 @@ describe('runMultistepTasks', () => {
         ]
       },
       consumeStepResults(_step, results) {
-        // no-op
+        for (const r of results) {
+          if (r.key === 'symbol') ctx.symbol = r.value as string
+          if (r.key === 'decimals') ctx.decimals = Number(r.value)
+        }
       },
       finalize() {
-        return { symbol: 'USDC', decimals: 6 }
+        return { symbol: ctx.symbol!, decimals: ctx.decimals! }
       },
     }
 
     const [result] = await runMultistepTasks(mockExecutor, [task])
-    expect(result.symbol).toBe('USDC')
-    expect(result.decimals).toBe(6)
+    expect(result!.symbol).toBe('USDC')
+    expect(result!.decimals).toBe(6)
   })
 
-  it('routes results to tasks by key', async () => {
+  it('routes results to correct task by key (multi-task)', async () => {
     const mockExecutor: StepExecutor = {
       async executeMulticall(_calls: StepCall[]): Promise<any[]> {
         return [
+          // Task 1
           { status: 'success', value: 'TOK1' },
           { status: 'success', value: 18 },
+          // Task 2
           { status: 'success', value: 'TOK2' },
           { status: 'success', value: 8 },
         ]
       },
     }
+
+    const ctx1: { symbol?: string; decimals?: number } = {}
+    const ctx2: { symbol?: string; decimals?: number } = {}
 
     const task1: MultistepTask<{ symbol: string; decimals: number }> = {
       maxStep: 1,
@@ -76,9 +88,14 @@ describe('runMultistepTasks', () => {
           },
         ]
       },
-      consumeStepResults() {},
+      consumeStepResults(_step, results) {
+        for (const r of results) {
+          if (r.key === 'symbol') ctx1.symbol = r.value as string
+          if (r.key === 'decimals') ctx1.decimals = Number(r.value)
+        }
+      },
       finalize() {
-        return { symbol: 'TOK1', decimals: 18 }
+        return { symbol: ctx1.symbol!, decimals: ctx1.decimals! }
       },
     }
 
@@ -101,17 +118,22 @@ describe('runMultistepTasks', () => {
           },
         ]
       },
-      consumeStepResults() {},
+      consumeStepResults(_step, results) {
+        for (const r of results) {
+          if (r.key === 'symbol') ctx2.symbol = r.value as string
+          if (r.key === 'decimals') ctx2.decimals = Number(r.value)
+        }
+      },
       finalize() {
-        return { symbol: 'TOK2', decimals: 8 }
+        return { symbol: ctx2.symbol!, decimals: ctx2.decimals! }
       },
     }
 
     const [result1, result2] = await runMultistepTasks(mockExecutor, [task1, task2])
-    expect(result1.symbol).toBe('TOK1')
-    expect(result1.decimals).toBe(18)
-    expect(result2.symbol).toBe('TOK2')
-    expect(result2.decimals).toBe(8)
+    expect(result1!.symbol).toBe('TOK1')
+    expect(result1!.decimals).toBe(18)
+    expect(result2!.symbol).toBe('TOK2')
+    expect(result2!.decimals).toBe(8)
   })
 
   it('executes multi-step task: step2 depends on step1 results', async () => {
@@ -165,8 +187,8 @@ describe('runMultistepTasks', () => {
     }
 
     const [result] = await runMultistepTasks(mockExecutor, [task])
-    expect(result.balance).toBe(1000n)
-    expect(result.assets).toBe(999n)
+    expect(result!.balance).toBe(1000n)
+    expect(result!.assets).toBe(999n)
   })
 
   it('skips failed calls (allowFailure) and continues', async () => {
@@ -178,6 +200,8 @@ describe('runMultistepTasks', () => {
         ]
       },
     }
+
+    const ctx: { symbol?: string; decimals?: number } = {}
 
     const task: MultistepTask<{ symbol: string | undefined; decimals: number }> = {
       maxStep: 1,
@@ -198,14 +222,19 @@ describe('runMultistepTasks', () => {
           },
         ]
       },
-      consumeStepResults() {},
+      consumeStepResults(_step, results) {
+        for (const r of results) {
+          if (r.key === 'symbol') ctx.symbol = r.value as string
+          if (r.key === 'decimals') ctx.decimals = Number(r.value)
+        }
+      },
       finalize() {
-        return { symbol: undefined, decimals: 6 }
+        return { symbol: ctx.symbol, decimals: ctx.decimals ?? 0 }
       },
     }
 
     const [result] = await runMultistepTasks(mockExecutor, [task])
-    expect(result.symbol).toBeUndefined()
-    expect(result.decimals).toBe(6)
+    expect(result!.symbol).toBeUndefined()
+    expect(result!.decimals).toBe(6)
   })
 })
