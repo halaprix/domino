@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>multistep-multicall - Batched on-chain reads</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;family=JetBrains+Mono:wght@100..900&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "secondary-container": "#49484e",
+                        "tertiary-fixed": "#e4e1ed",
+                        "outline-variant": "#464554",
+                        "on-primary-fixed": "#07006c",
+                        "primary": "#c0c1ff",
+                        "secondary-fixed-dim": "#c8c5cd",
+                        "error": "#ffb4ab",
+                        "on-secondary": "#303036",
+                        "on-tertiary-fixed": "#1b1b23",
+                        "tertiary-container": "#918f9a",
+                        "surface-container": "#192029",
+                        "inverse-surface": "#dce3f0",
+                        "surface-container-lowest": "#080f17",
+                        "tertiary-fixed-dim": "#c7c5d0",
+                        "on-surface-variant": "#c7c4d7",
+                        "surface-dim": "#0d141d",
+                        "surface-tint": "#c0c1ff",
+                        "background": "#0d141d",
+                        "on-surface": "#dce3f0",
+                        "on-secondary-container": "#bab7be",
+                        "on-secondary-fixed": "#1b1b20",
+                        "primary-fixed": "#e1e0ff",
+                        "on-tertiary": "#303038",
+                        "secondary": "#c8c5cd",
+                        "on-primary-container": "#0d0096",
+                        "on-tertiary-fixed-variant": "#46464f",
+                        "on-tertiary-container": "#292931",
+                        "on-error-container": "#ffdad6",
+                        "inverse-primary": "#494bd6",
+                        "surface-container-low": "#151c25",
+                        "tertiary": "#c7c5d0",
+                        "on-primary-fixed-variant": "#2f2ebe",
+                        "surface-container-highest": "#2e353f",
+                        "on-background": "#dce3f0",
+                        "secondary-fixed": "#e4e1e9",
+                        "on-primary": "#1000a9",
+                        "surface-variant": "#2e353f",
+                        "primary-fixed-dim": "#c0c1ff",
+                        "outline": "#908fa0",
+                        "on-secondary-fixed-variant": "#47464c",
+                        "primary-container": "#8083ff",
+                        "surface": "#0d141d",
+                        "error-container": "#93000a",
+                        "surface-container-high": "#232a34",
+                        "surface-bright": "#333a44",
+                        "inverse-on-surface": "#2a313b",
+                        "on-error": "#690005",
+                        "accent-glow": "#6366f1"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "container-max": "1200px",
+                        "lg": "48px",
+                        "base": "4px",
+                        "xl": "80px",
+                        "md": "24px",
+                        "sm": "16px",
+                        "gutter": "24px",
+                        "xs": "8px"
+                    },
+                    "fontFamily": {
+                        "headline-lg": ["Geist"],
+                        "headline-lg-mobile": ["Geist"],
+                        "label-caps": ["JetBrains Mono"],
+                        "body-md": ["Geist"],
+                        "code-block": ["JetBrains Mono"],
+                        "body-lg": ["Geist"],
+                        "headline-md": ["Geist"]
+                    },
+                    "fontSize": {
+                        "headline-lg": ["48px", { "lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+                        "headline-lg-mobile": ["32px", { "lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+                        "label-caps": ["12px", { "lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600" }],
+                        "body-md": ["16px", { "lineHeight": "24px", "fontWeight": "400" }],
+                        "code-block": ["14px", { "lineHeight": "20px", "fontWeight": "400" }],
+                        "body-lg": ["18px", { "lineHeight": "28px", "fontWeight": "400" }],
+                        "headline-md": ["32px", { "lineHeight": "40px", "letterSpacing": "-0.01em", "fontWeight": "600" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .code-container {
+            background-color: #16161e;
+            border: 1px solid #26262e;
+        }
+        .glow-hover:hover {
+            box-shadow: 0 0 20px rgba(99, 102, 241, 0.4);
+        }
+        .feature-card {
+            background: linear-gradient(180deg, #1c1c24 0%, #16161e 100%);
+            border: 1px solid #26262e;
+        }
+        body {
+            background-color: #0a0a0f;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body-md antialiased overflow-x-hidden min-h-screen flex flex-col">
+<!-- TopNavBar -->
+<nav class="fixed top-0 w-full z-50 flex justify-between items-center px-gutter max-w-container-max mx-auto h-16 bg-background border-b border-outline-variant transition-all duration-200 ease-in-out">
+<div class="font-headline-md text-headline-md font-bold text-on-background tracking-tight">multistep-multicall</div>
+<div class="hidden md:flex gap-md items-center">
+<a class="text-on-surface-variant hover:text-primary transition-colors font-body-md text-body-md" href="#">Docs</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors font-body-md text-body-md" href="#">Examples</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors font-body-md text-body-md" href="#">Benchmarks</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors font-body-md text-body-md" href="#">GitHub</a>
+<span class="ml-sm font-label-caps text-label-caps bg-primary/10 text-primary px-2 py-1 rounded">v1.2.0</span>
+</div>
+</nav>
+<main class="flex-grow pt-32 pb-xl px-gutter max-w-container-max mx-auto w-full">
+<!-- Hero Section -->
+<section class="text-center max-w-4xl mx-auto mb-xl">
+<div class="inline-flex items-center gap-2 mb-sm px-3 py-1 rounded-full border border-primary/20 bg-primary/5 text-primary font-label-caps text-label-caps">
+<span class="material-symbols-outlined text-[16px]">bolt</span> Batched on-chain reads
+            </div>
+<h1 class="font-headline-lg-mobile md:font-headline-lg text-headline-lg-mobile md:text-headline-lg mb-md text-white">
+                Batched on-chain reads.<br/>
+<span class="text-transparent bg-clip-text bg-gradient-to-r from-primary to-inverse-primary">Without the compromise.</span>
+</h1>
+<p class="font-body-lg text-body-lg text-on-surface-variant mb-lg max-w-2xl mx-auto">
+                multistep-multicall solves the N×M RPC problem. Sequential, state-dependent contract reads — resolved in M multicalls, not N×M individual calls.
+            </p>
+<div class="flex flex-col sm:flex-row gap-sm justify-center items-center">
+<a class="px-6 py-3 bg-inverse-primary text-white rounded-md font-body-md text-body-md font-semibold glow-hover transition-all" href="#">Get started</a>
+<a class="px-6 py-3 border border-outline-variant hover:border-primary hover:text-primary text-on-surface rounded-md font-body-md text-body-md transition-all flex items-center gap-2" href="#">View on GitHub <span class="material-symbols-outlined text-[18px]">arrow_forward</span></a>
+</div>
+</section>
+<!-- Stats Bar -->
+<section class="mb-xl">
+<div class="flex flex-wrap justify-center gap-sm md:gap-lg py-md border-y border-outline-variant/50">
+<div class="flex items-center gap-2 font-label-caps text-label-caps text-on-surface-variant">
+<span class="material-symbols-outlined text-primary">data_object</span> 1.9KB gzipped (viem)
+                </div>
+<div class="flex items-center gap-2 font-label-caps text-label-caps text-on-surface-variant">
+<span class="material-symbols-outlined text-primary">code</span> 2.3KB gzipped (ethers-v5)
+                </div>
+<div class="flex items-center gap-2 font-label-caps text-label-caps text-on-surface-variant">
+<span class="material-symbols-outlined text-primary">check_circle</span> 33 tests passing
+                </div>
+<div class="flex items-center gap-2 font-label-caps text-label-caps text-on-surface-variant">
+<span class="material-symbols-outlined text-primary">gavel</span> MIT License
+                </div>
+</div>
+</section>
+<!-- Comparison Section -->
+<section class="mb-xl">
+<h2 class="font-headline-md text-headline-md text-white mb-md text-center">Stop making N×M calls</h2>
+<div class="grid md:grid-cols-2 gap-md">
+<!-- The Problem -->
+<div class="code-container rounded-lg p-sm relative group">
+<div class="absolute top-0 left-0 w-full px-sm py-xs border-b border-outline-variant/50 flex justify-between items-center bg-surface-container-highest/20">
+<span class="font-label-caps text-label-caps text-error flex items-center gap-2"><span class="material-symbols-outlined text-[16px]">close</span> The problem</span>
+</div>
+<pre class="pt-10 font-code-block text-code-block overflow-x-auto text-on-surface-variant"><span class="text-inverse-primary">for</span> (<span class="text-primary">const</span> vault <span class="text-inverse-primary">of</span> vaults) {
+  <span class="text-outline">// Call 1</span>
+  <span class="text-primary">const</span> token = <span class="text-inverse-primary">await</span> vault.asset();
+  
+  <span class="text-outline">// Call 2 (depends on Call 1)</span>
+  <span class="text-primary">const</span> decimals = <span class="text-inverse-primary">await</span> erc20.decimals(token);
+  
+  <span class="text-outline">// Call 3</span>
+  <span class="text-primary">const</span> balance = <span class="text-inverse-primary">await</span> vault.balanceOf(user);
+}</pre>
+</div>
+<!-- The Solution -->
+<div class="code-container rounded-lg p-sm relative group border-primary/30 shadow-[0_0_15px_rgba(99,102,241,0.1)]">
+<div class="absolute top-0 left-0 w-full px-sm py-xs border-b border-outline-variant/50 flex justify-between items-center bg-surface-container-highest/20">
+<span class="font-label-caps text-label-caps text-primary flex items-center gap-2"><span class="material-symbols-outlined text-[16px]">check</span> The solution</span>
+<button class="text-on-surface-variant hover:text-primary transition-colors opacity-0 group-hover:opacity-100"><span class="material-symbols-outlined text-[16px]">content_copy</span></button>
+</div>
+<pre class="pt-10 font-code-block text-code-block overflow-x-auto text-on-surface-variant"><span class="text-outline">// 1 single batched multicall</span>
+<span class="text-primary">const</span> results = <span class="text-inverse-primary">await</span> resolver.resolveBatch(
+  vaults.map(v =&gt; ({ 
+    vault: v, 
+    owner: user 
+  }))
+);</pre>
+</div>
+</div>
+</section>
+<!-- Features Grid -->
+<section class="mb-xl">
+<div class="grid md:grid-cols-3 gap-md">
+<div class="feature-card rounded-lg p-md hover:border-primary/50 transition-colors">
+<div class="w-10 h-10 rounded bg-primary/10 flex items-center justify-center mb-sm text-primary">
+<span class="material-symbols-outlined">account_tree</span>
+</div>
+<h3 class="font-body-lg text-body-lg font-bold text-white mb-xs">FSM executor</h3>
+<p class="font-body-md text-body-md text-on-surface-variant">Results from step N flow automatically into step N+1. Build complex read pipelines.</p>
+</div>
+<div class="feature-card rounded-lg p-md hover:border-primary/50 transition-colors">
+<div class="w-10 h-10 rounded bg-primary/10 flex items-center justify-center mb-sm text-primary">
+<span class="material-symbols-outlined">extension</span>
+</div>
+<h3 class="font-body-lg text-body-lg font-bold text-white mb-xs">Framework agnostic</h3>
+<p class="font-body-md text-body-md text-on-surface-variant">First-class support for viem, ethers v6, and ethers v5. Fully tree-shaken.</p>
+</div>
+<div class="feature-card rounded-lg p-md hover:border-primary/50 transition-colors">
+<div class="w-10 h-10 rounded bg-primary/10 flex items-center justify-center mb-sm text-primary">
+<span class="material-symbols-outlined">speed</span>
+</div>
+<h3 class="font-body-lg text-body-lg font-bold text-white mb-xs">Zero dependencies</h3>
+<p class="font-body-md text-body-md text-on-surface-variant">Relies only on Multicall3 on-chain. Incredibly lightweight footprint.</p>
+</div>
+</div>
+</section>
+<!-- Quick Start -->
+<section class="mb-xl max-w-3xl mx-auto">
+<h2 class="font-headline-md text-headline-md text-white mb-sm">Quick Start</h2>
+<div class="code-container rounded-lg p-sm relative group">
+<button class="absolute top-sm right-sm text-on-surface-variant hover:text-primary transition-colors opacity-0 group-hover:opacity-100 bg-surface-container p-1 rounded border border-outline-variant"><span class="material-symbols-outlined text-[16px]">content_copy</span></button>
+<pre class="font-code-block text-code-block overflow-x-auto text-on-surface-variant"><span class="text-inverse-primary">import</span> { createResolver } <span class="text-inverse-primary">from</span> <span class="text-primary">"@halaprix/multistep-multicall/engines/viem"</span>;
+
+<span class="text-primary">const</span> resolver = createResolver(client);
+<span class="text-primary">const</span> vault = <span class="text-inverse-primary">await</span> resolver.resolveErc4626({ 
+  vault: <span class="text-primary">"0x..."</span>, 
+  owner: <span class="text-primary">"0x..."</span> 
+});</pre>
+</div>
+</section>
+</main>
+<!-- Footer -->
+<footer class="w-full py-xl px-gutter max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-md bg-surface-container-lowest border-t border-outline-variant mt-auto">
+<div class="font-label-caps text-label-caps text-on-surface-variant">
+            © 2024 Multistep-Multicall. Licensed under MIT. Built by halaprix.
+        </div>
+<div class="flex gap-md font-label-caps text-label-caps">
+<a class="text-on-surface-variant hover:text-primary transition-colors" href="#">Security</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors" href="#">Changelog</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors" href="#">Community</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors" href="#">Status</a>
+</div>
+</footer>
+</body></html>
