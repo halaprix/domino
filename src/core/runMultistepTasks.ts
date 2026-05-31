@@ -16,19 +16,36 @@
 import type { MultistepTask, StepCall, StepResult, StepExecutor, RawResult } from './types'
 
 /**
+ * Options for runMultistepTasks.
+ */
+export interface BatchOptions {
+  /**
+   * Maximum number of calls per multicall batch.
+   *
+   * Multicall3 aggregate3 has a per-call gas limit. When a single step has
+   * more than this many calls, it is split into sequential batches.
+   * Default: 100.
+   */
+  batchSize?: number
+}
+
+/**
  * Execute multiple MultistepTasks against a single StepExecutor.
  *
  * @param executor - Framework-specific multicall executor (viem, ethers, etc.)
  * @param tasks - Array of MultistepTask instances
+ * @param options - Optional batching options
  * @returns Array of finalized results in same order as input tasks
  */
 export async function runMultistepTasks<TResult>(
   executor: StepExecutor,
   tasks: MultistepTask<TResult>[],
+  options?: BatchOptions,
 ): Promise<TResult[]> {
   if (tasks.length === 0) return []
 
   const maxStep = tasks.reduce((max, task) => (task.maxStep > max ? task.maxStep : max), 0)
+  const batchSize = options?.batchSize ?? 100
 
   for (let step = 1; step <= maxStep; step++) {
     const calls: StepCall[] = []

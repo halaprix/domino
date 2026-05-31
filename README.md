@@ -258,6 +258,24 @@ import { createResolver } from "@halaprix/multistep-multicall/engines/viem";
 
 ---
 
+## Benchmarks
+
+Run `npm run benchmark` to reproduce. Benchmark measures RPC call count (network round-trips) and wall time. Uses a counting executor that records calls without real network latency — multiply wall times by your RPC latency for real-world estimates.
+
+| Scenario | Naive RPC | multistep RPC | ↓ Calls | Notes |
+|---|---|---|---|---|
+| 10 tokens + 10 vaults | 50 | 1 | 98.0% | |
+| 100 tokens + 10 vaults | 230 | 1 | 99.6% | |
+| 100 tokens + 100 vaults | 500 | 1 | 99.8% | |
+| 1000 tokens + 10 vaults | 2,030 | 1 | 100.0% | |
+| 1000 tokens + 100 vaults | 2,300 | 1 | 100.0% | |
+
+**Key insight:** No matter how many tokens or vaults, `runMultistepTasks` completes in exactly **1 RPC call** (step 1 batch). The naive approach scales linearly — 2,300 calls for 1,000 tokens + 100 vaults.
+
+With anvil (2-5ms RPC): ~10-25ms total. With public RPC (50-200ms): ~0.5-2s instead of ~2-8 minutes.
+
+---
+
 ## Requirements
 
 - Node.js ≥ 18
