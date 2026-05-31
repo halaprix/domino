@@ -12,14 +12,17 @@ export interface StepCall {
   /** Logical key for routing results back. */
   key: string;
   /** Target contract address. */
-  target: `0x${string}`;
+  target: Address;
   /** ABI for the contract (used by viem). */
-  abi: unknown[];
+  abi: readonly unknown[];
   /** Function name to call. */
   functionName: string;
   /** Raw arguments — validated at viem call-site, not here. */
   args?: readonly unknown[];
 }
+
+/** Valid hex address string. */
+export type Address = `0x${string}`;
 
 /**
  * Result of a single successful call.

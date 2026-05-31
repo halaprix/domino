@@ -9,10 +9,24 @@
  *                    maxRedeem → then convertToAssets(balance))
  */
 
-import { type Address, type PublicClient, erc20Abi, erc4626Abi } from "viem";
-import type { MultistepTask, StepCall, StepResult, StepExecutor } from "../core/types";
+import type { Address, MultistepTask, StepCall, StepResult, StepExecutor } from "../core/types";
 import { runMultistepTasks } from "../core/runMultistepTasks";
 import { ViemExecutor } from "../engines/ViemExecutor";
+
+/** Minimal ERC20 ABI — only the functions used for vault metadata + balance. */
+const erc20Abi = [
+  "function symbol() view returns (string)",
+  "function decimals() view returns (uint8)",
+  "function balanceOf(address) view returns (uint256)",
+] as const;
+
+/** Minimal ERC4626 ABI — only the functions used by buildErc4626Task. */
+const erc4626Abi = [
+  "function asset() view returns (address)",
+  "function maxWithdraw(address) view returns (uint256)",
+  "function maxRedeem(address) view returns (uint256)",
+  "function convertToAssets(uint256) view returns (uint256)",
+] as const;
 
 export interface Erc4626VaultResolution {
   metadata: {
@@ -49,15 +63,15 @@ export function buildErc4626Task(params: {
     buildStepCalls(step) {
       if (step === 1) {
         const calls: StepCall[] = [
-          { key: "symbol", target: vault, abi: [...erc20Abi], functionName: "symbol" },
-          { key: "decimals", target: vault, abi: [...erc20Abi], functionName: "decimals" },
-          { key: "asset", target: vault, abi: [...erc4626Abi], functionName: "asset" },
+          { key: "symbol", target: vault, abi: erc20Abi, functionName: "symbol" },
+          { key: "decimals", target: vault, abi: erc20Abi, functionName: "decimals" },
+          { key: "asset", target: vault, abi: erc4626Abi, functionName: "asset" },
         ];
         if (hasOwner && owner) {
           calls.push(
-            { key: "balance", target: vault, abi: [...erc20Abi], functionName: "balanceOf", args: [owner] },
-            { key: "maxWithdraw", target: vault, abi: [...erc4626Abi], functionName: "maxWithdraw", args: [owner] },
-            { key: "maxRedeem", target: vault, abi: [...erc4626Abi], functionName: "maxRedeem", args: [owner] },
+            { key: "balance", target: vault, abi: erc20Abi, functionName: "balanceOf", args: [owner] },
+            { key: "maxWithdraw", target: vault, abi: erc4626Abi, functionName: "maxWithdraw", args: [owner] },
+            { key: "maxRedeem", target: vault, abi: erc4626Abi, functionName: "maxRedeem", args: [owner] },
           );
         }
         return calls;
@@ -69,7 +83,7 @@ export function buildErc4626Task(params: {
           {
             key: "assets",
             target: vault,
-            abi: [...erc4626Abi],
+            abi: erc4626Abi,
             functionName: "convertToAssets",
             args: [ctx.balance],
           },
@@ -113,14 +127,13 @@ export function buildErc4626Task(params: {
   };
 }
 
-/** Coerce to StepExecutor — wraps PublicClient in ViemExecutor if needed. */
-function toExecutor(client: StepExecutor | PublicClient): StepExecutor {
-  if ("executeMulticall" in client) return client;
-  return new ViemExecutor(client);
+/** Coerce to StepExecutor — callers must pass a StepExecutor directly. */
+function toExecutor(client: StepExecutor): StepExecutor {
+  return client;
 }
 
 export async function resolveErc4626Vault(params: {
-  client: StepExecutor | PublicClient;
+  client: StepExecutor;
   vault: Address;
   owner?: Address;
 }): Promise<Erc4626VaultResolution> {
@@ -132,7 +145,7 @@ export async function resolveErc4626Vault(params: {
 }
 
 export async function resolveErc4626VaultsBulk(params: {
-  client: StepExecutor | PublicClient;
+  client: StepExecutor;
   entries: { vault: Address; owner?: Address }[];
 }): Promise<Erc4626VaultResolution[]> {
   if (params.entries.length === 0) return [];

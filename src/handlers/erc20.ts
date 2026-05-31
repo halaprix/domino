@@ -8,10 +8,16 @@
  *   Step 1: symbol(), decimals(), balanceOf(owner?)
  */
 
-import { type Address, type PublicClient, erc20Abi } from "viem";
-import type { MultistepTask, StepCall, StepResult, StepExecutor } from "../core/types";
+import type { Address, MultistepTask, StepCall, StepResult, StepExecutor } from "../core/types";
 import { runMultistepTasks } from "../core/runMultistepTasks";
 import { ViemExecutor } from "../engines/ViemExecutor";
+
+/** Minimal ERC20 ABI — only the functions used by buildErc20Task. */
+const erc20Abi = [
+  "function symbol() view returns (string)",
+  "function decimals() view returns (uint8)",
+  "function balanceOf(address) view returns (uint256)",
+] as const;
 
 export interface Erc20TokenResolution {
   symbol: string | undefined;
@@ -43,13 +49,13 @@ export function buildErc20Task(params: {
         {
           key: "symbol",
           target: token,
-          abi: [...erc20Abi],
+          abi: erc20Abi,
           functionName: "symbol",
         },
         {
           key: "decimals",
           target: token,
-          abi: [...erc20Abi],
+          abi: erc20Abi,
           functionName: "decimals",
         },
       ];
@@ -58,7 +64,7 @@ export function buildErc20Task(params: {
         calls.push({
           key: "balance",
           target: token,
-          abi: [...erc20Abi],
+          abi: erc20Abi,
           functionName: "balanceOf",
           args: [owner],
         });
@@ -92,13 +98,12 @@ export function buildErc20Task(params: {
 }
 
 /** Coerce to StepExecutor — wraps PublicClient in ViemExecutor if needed. */
-function toExecutor(client: StepExecutor | PublicClient): StepExecutor {
-  if ("executeMulticall" in client) return client;
-  return new ViemExecutor(client);
+function toExecutor(client: StepExecutor): StepExecutor {
+  return client;
 }
 
 export async function resolveErc20Token(params: {
-  client: StepExecutor | PublicClient;
+  client: StepExecutor;
   token: Address;
   owner?: Address;
 }): Promise<Erc20TokenResolution> {
@@ -110,7 +115,7 @@ export async function resolveErc20Token(params: {
 }
 
 export async function resolveErc20TokensBulk(params: {
-  client: StepExecutor | PublicClient;
+  client: StepExecutor;
   entries: { token: Address; owner?: Address }[];
 }): Promise<Erc20TokenResolution[]> {
   if (params.entries.length === 0) return [];

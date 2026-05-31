@@ -30,7 +30,7 @@ export default defineConfig([
     treeshake: true,
     outNames: "ethers-v6",
   },
-  // ethers v5 engine
+  // ethers v5 engine — external so the 180KB ethers-v5 lib is NOT bundled
   {
     entry: ["src/engines/ethers-v5.ts"],
     outDir: "dist/engines",
@@ -39,5 +39,6 @@ export default defineConfig([
     sourcemap: true,
     treeshake: true,
     outNames: "ethers-v5",
+    external: ["ethers-v5"],
   },
 ]);
