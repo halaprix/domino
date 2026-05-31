@@ -1,10 +1,11 @@
 /**
- * Viem engine : implements StepExecutor via viem's built-in multicall3.
+ * Viem engine — implements StepExecutor via viem's built-in multicall3.
  */
 
 import { type Address, type PublicClient } from 'viem'
 import type { Abi } from 'viem'
 import type { StepExecutor, StepCall, RawResult } from '../core/types'
+import { MULTICALL3_ADDRESS } from '../abis/multicall3'
 import { runMultistepTasks } from '../core/runMultistepTasks'
 import { buildErc20Task, type Erc20TokenResolution } from '../handlers/erc20'
 import { buildErc4626Task, type Erc4626VaultResolution } from '../handlers/erc4626'
@@ -35,6 +36,9 @@ function createViemExecutor(client: PublicClient): StepExecutor {
       const results = await client.multicall({
         contracts: contracts as Parameters<typeof client.multicall>[0]['contracts'],
         allowFailure: true,
+        // Pass the canonical Multicall3 address explicitly so the engine works
+        // even when the client has no chain (or a chain without multicall3) configured.
+        multicallAddress: MULTICALL3_ADDRESS,
       })
 
       return results.map((r) => {
