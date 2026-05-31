@@ -22,11 +22,6 @@ export interface ResolverEngine {
   }): Promise<Erc4626VaultResolution[]>
 }
 
-function normalizeValue(result: unknown): unknown {
-  if (Array.isArray(result) && result.length === 1) return result[0]
-  return result
-}
-
 function createViemExecutor(client: PublicClient): StepExecutor {
   return {
     async executeMulticall(calls: StepCall[]): Promise<RawResult[]> {
@@ -44,8 +39,9 @@ function createViemExecutor(client: PublicClient): StepExecutor {
 
       return results.map((r) => {
         if (r.status === 'failure') return { status: 'failure' as const }
-        const value = normalizeValue(r.result)
-        return { status: 'success' as const, value }
+        // viem's multicall already unwraps single-output function returns
+        // (e.g. symbol() → 'USDC', not ['USDC'])
+        return { status: 'success' as const, value: r.result }
       })
     },
   }

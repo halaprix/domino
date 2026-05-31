@@ -4,12 +4,11 @@ import type { PublicClient } from 'viem'
 
 describe('viem engine', () => {
   it('resolves ERC20 symbol and decimals', async () => {
-    // viem multicall returns decoded values; string results come back as [string]
+    // viem multicall returns decoded values directly — single-output functions
+    // like symbol() come back as 'USDC', not ['USDC']
     const mockClient = {
       multicall: vi.fn().mockResolvedValue([
-        // symbol() returns array wrapper
-        { status: 'success', result: ['USDC'] },
-        // decimals() returns the bigint directly
+        { status: 'success', result: 'USDC' },
         { status: 'success', result: 6n },
       ]),
     } as unknown as PublicClient
@@ -29,9 +28,9 @@ describe('viem engine', () => {
         .fn()
         .mockResolvedValueOnce([
           // Step 1: symbol, decimals, asset, balanceOf, maxWithdraw, maxRedeem
-          { status: 'success', result: ['wstETH'] },
+          { status: 'success', result: 'wstETH' },
           { status: 'success', result: 18n },
-          { status: 'success', result: ['0xae7ab96520de3a18e5e111b5eaab095312d7fe84'] },
+          { status: 'success', result: '0xae7ab96520de3a18e5e111b5eaab095312d7fe84' },
           { status: 'success', result: 1n },
           { status: 'success', result: 1n },
           { status: 'success', result: 1n },
@@ -58,9 +57,9 @@ describe('viem engine', () => {
   it('resolveErc20Bulk batches into single multicall', async () => {
     const mockClient = {
       multicall: vi.fn().mockResolvedValue([
-        { status: 'success', result: ['USDC'] },
+        { status: 'success', result: 'USDC' },
         { status: 'success', result: 6n },
-        { status: 'success', result: ['DAI'] },
+        { status: 'success', result: 'DAI' },
         { status: 'success', result: 18n },
       ]),
     } as unknown as PublicClient
