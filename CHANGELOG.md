@@ -45,5 +45,5 @@ First public release of `@halaprix/domino`.
 - `position.assets` is `bigint | undefined` — correctly represents the case where `balanceOf` succeeds but `convertToAssets` reverts.
 - CI now runs real `tsc --noEmit` (typecheck); build step runs before tests so `dist/` exists for bundle-size checks on a clean checkout.
 
-[Unreleased]: https://github.com/halaprix/multistep-multicall/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/halaprix/multistep-multicall/releases/tag/v0.1.0
+[Unreleased]: https://github.com/halaprix/domino/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/halaprix/domino/releases/tag/v0.1.0

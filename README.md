@@ -1,6 +1,6 @@
 # domino
 
-[![CI](https://github.com/halaprix/multistep-multicall/actions/workflows/ci.yml/badge.svg)](https://github.com/halaprix/multistep-multicall/actions/workflows/ci.yml)
+[![CI](https://github.com/halaprix/domino/actions/workflows/ci.yml/badge.svg)](https://github.com/halaprix/domino/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/@halaprix/domino)](https://www.npmjs.com/package/@halaprix/domino)
 [![bundle size](https://img.shields.io/badge/gzip-1.8%E2%80%932.4KB-brightgreen)](https://www.npmjs.com/package/@halaprix/domino)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5-blue)](https://www.typescriptlang.org/)

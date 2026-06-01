@@ -17,9 +17,9 @@
   "engines": {
     "node": ">=18"
   },
-  "homepage": "https://github.com/halaprix/multistep-multicall#readme",
+  "homepage": "https://github.com/halaprix/domino#readme",
   "bugs": {
-    "url": "https://github.com/halaprix/multistep-multicall/issues"
+    "url": "https://github.com/halaprix/domino/issues"
   },
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -120,7 +120,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/halaprix/multistep-multicall"
+    "url": "https://github.com/halaprix/domino"
   },
   "dependencies": {
     "abitype": "^1.2.4"
