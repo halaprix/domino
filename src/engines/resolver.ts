@@ -17,7 +17,8 @@
  * is equivalent to: new MulticallResolver(createXxxExecutor(client)).
  */
 
-import type { Address, StepExecutor } from '../core/types'
+import type { Address, StepExecutor, MultistepTask } from '../core/types'
+import { runMultistepTasks, type BatchOptions } from '../core/runMultistepTasks'
 import {
   resolveErc20Token,
   resolveErc20TokensBulk,
@@ -38,6 +39,12 @@ export type { Erc20TokenResolution, Erc4626VaultResolution }
  * (`0x${string}`) for viem/ethers v6, plain `string` for ethers v5.
  */
 export interface ResolverEngine<TAddr extends string = Address> {
+  /**
+   * Generic extension point — execute any MultistepTask(s) against this executor.
+   * Use this for custom token standards (ERC721, Uniswap pairs, etc.) beyond
+   * the built-in ERC20/ERC4626 conveniences.
+   */
+  run<T>(tasks: MultistepTask<T>[], options?: BatchOptions): Promise<T[]>
   resolveErc20(params: { token: TAddr; owner?: TAddr }): Promise<Erc20TokenResolution>
   resolveErc20Bulk(params: {
     entries: { token: TAddr; owner?: TAddr }[]
@@ -74,11 +81,19 @@ function erc4626Params(vault: string, owner?: string): { vault: Address; owner?:
 export class MulticallResolver<TAddr extends string = Address>
   implements ResolverEngine<TAddr>
 {
-  constructor(private readonly executor: StepExecutor) {}
+  constructor(private readonly _executor: StepExecutor) {}
+
+  get executor(): StepExecutor {
+    return this._executor
+  }
+
+  run<T>(tasks: MultistepTask<T>[], options?: BatchOptions): Promise<T[]> {
+    return runMultistepTasks(this._executor, tasks, options)
+  }
 
   resolveErc20(params: { token: TAddr; owner?: TAddr }): Promise<Erc20TokenResolution> {
     return resolveErc20Token({
-      client: this.executor,
+      client: this._executor,
       ...erc20Params(params.token, params.owner),
     })
   }
@@ -88,7 +103,7 @@ export class MulticallResolver<TAddr extends string = Address>
     batchSize?: number
   }): Promise<Erc20TokenResolution[]> {
     return resolveErc20TokensBulk({
-      client: this.executor,
+      client: this._executor,
       entries: params.entries.map((e) => erc20Params(e.token, e.owner)),
       ...(params.batchSize !== undefined ? { batchSize: params.batchSize } : {}),
     })
@@ -96,7 +111,7 @@ export class MulticallResolver<TAddr extends string = Address>
 
   resolveErc4626(params: { vault: TAddr; owner?: TAddr }): Promise<Erc4626VaultResolution> {
     return resolveErc4626Vault({
-      client: this.executor,
+      client: this._executor,
       ...erc4626Params(params.vault, params.owner),
     })
   }
@@ -106,7 +121,7 @@ export class MulticallResolver<TAddr extends string = Address>
     batchSize?: number
   }): Promise<Erc4626VaultResolution[]> {
     return resolveErc4626VaultsBulk({
-      client: this.executor,
+      client: this._executor,
       entries: params.entries.map((e) => erc4626Params(e.vault, e.owner)),
       ...(params.batchSize !== undefined ? { batchSize: params.batchSize } : {}),
     })

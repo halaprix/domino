@@ -102,6 +102,19 @@ describe('MulticallResolver', () => {
     expectTypeOf(resolver.resolveErc4626).toBeFunction()
     expectTypeOf(resolver.resolveErc20Bulk).toBeFunction()
     expectTypeOf(resolver.resolveErc4626Bulk).toBeFunction()
+    expectTypeOf(resolver.run).toBeFunction()
+    expectTypeOf(resolver.executor).toEqualTypeOf<StepExecutor>()
+  })
+
+  it('run<T> infers correct return types from tasks', async () => {
+    const executor: StepExecutor = {
+      async executeMulticall(calls) {
+        return calls.map(() => ({ status: 'success' as const, value: 'x' }))
+      },
+    }
+    const resolver = new MulticallResolver(executor)
+    const task = buildErc20Task({ token: ADDR })
+    expectTypeOf(resolver.run([task])).resolves.toEqualTypeOf<Erc20TokenResolution[]>()
   })
 
   it('resolveErc20 returns Erc20TokenResolution', () => {

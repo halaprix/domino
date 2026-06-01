@@ -64,15 +64,39 @@ import { createResolver } from "@halaprix/multistep-multicall/engines/viem";
 // or "multistep-multicall/engines/ethers-v6"
 ```
 
-Returns a `ResolverEngine` with a uniform API regardless of which library you chose:
+Returns a `ResolverEngine` with a uniform API regardless of which library you chose. The `ResolverEngine` is designed as a convenience facade that provides the most common DeFi tokens (ERC20/ERC4626) built in, while also providing a generic extension point for executing custom tasks.
 
 ```typescript
 interface ResolverEngine {
+  /** 
+   * Generic extension point — execute any MultistepTask(s) against this executor.
+   * Use this for custom token standards (ERC721, Uniswap pairs, etc.) beyond
+   * the built-in ERC20/ERC4626 conveniences.
+   */
+  run<T>(tasks: MultistepTask<T>[], options?: BatchOptions): Promise<T[]>;
+  
   resolveErc20(params: { token: Address; owner?: Address }): Promise<Erc20TokenResolution>;
   resolveErc20Bulk(params: { entries: { token: Address; owner?: Address }[]; batchSize?: number }): Promise<Erc20TokenResolution[]>;
   resolveErc4626(params: { vault: Address; owner?: Address }): Promise<Erc4626VaultResolution>;
   resolveErc4626Bulk(params: { entries: { vault: Address; owner?: Address }[]; batchSize?: number }): Promise<Erc4626VaultResolution[]>;
 }
+```
+
+### Extending the Engine via `run<T>()`
+
+The core primitive of this library is the `MultistepTask` coupled with the `runMultistepTasks` runner. All built-in resolver methods (like `resolveErc20`) are simply thin wrappers over this primitive. 
+
+If you need to fetch state from custom smart contracts, you don't need to rebuild the engine. Simply construct a custom `MultistepTask` and pass it to the `run<T>()` method:
+
+```typescript
+// Custom task definition
+const myTask = buildUniswapPairTask(pairAddress);
+
+// Execute it using the standard engine resolver
+const [price] = await resolver.run([myTask]);
+
+// Alternatively, compose the raw executor manually:
+// await runMultistepTasks(resolver.executor, [myTask])
 ```
 
 ### Layer 2 — Direct handler API (framework-agnostic)
