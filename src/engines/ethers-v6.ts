@@ -6,7 +6,7 @@ import { Contract as ContractCls, Interface as InterfaceCls } from 'ethers'
 import { ercCombinedAbi } from '../abis/erc'
 import { MULTICALL3_ADDRESS, multicall3Abi } from '../abis/multicall3'
 import { createEncodedExecutor, type Aggregate3Contract, type EncodingInterface } from './shared'
-import { MulticallResolver, makeResolver, type ResolverEngine } from './resolver'
+import { makeResolver, type ResolverEngine } from './resolver'
 import type { StepExecutor } from '../core/types'
 
 export type { Erc20TokenResolution, Erc4626VaultResolution, ResolverEngine } from './resolver'

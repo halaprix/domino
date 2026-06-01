@@ -7,11 +7,7 @@ import { BigNumber } from 'ethers-v5'
 import { MULTICALL3_ADDRESS, multicall3Abi } from '../abis/multicall3'
 import { ercCombinedAbi } from '../abis/erc'
 import { createEncodedExecutor, type Aggregate3Contract, type EncodingInterface } from './shared'
-import {
-  MulticallResolver,
-  makeResolver,
-  type ResolverEngine as ResolverEngineGeneric,
-} from './resolver'
+import { makeResolver, type ResolverEngine as ResolverEngineGeneric } from './resolver'
 import type { StepExecutor } from '../core/types'
 
 export type { Erc20TokenResolution, Erc4626VaultResolution } from './resolver'

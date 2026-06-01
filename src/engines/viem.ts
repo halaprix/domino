@@ -5,7 +5,7 @@
 import { type PublicClient } from 'viem'
 import type { StepExecutor, StepCall, RawResult } from '../core/types'
 import { MULTICALL3_ADDRESS } from '../abis/multicall3'
-import { MulticallResolver, makeResolver, type ResolverEngine } from './resolver'
+import { makeResolver, type ResolverEngine } from './resolver'
 
 export type { Erc20TokenResolution, Erc4626VaultResolution, ResolverEngine } from './resolver'
 export { MulticallResolver } from './resolver'
