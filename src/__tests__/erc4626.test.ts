@@ -88,9 +88,9 @@ describe('resolveErc4626Vault', () => {
         { status: 'success', value: 'wstETH' },
         { status: 'success', value: 18n },
         { status: 'success', value: '0xae7ab96520de3a18e5e111b5eaab095312d7fe84' },
-        { status: 'failure', value: undefined },
-        { status: 'failure', value: undefined },
-        { status: 'failure', value: undefined },
+        { status: 'failure' },
+        { status: 'failure' },
+        { status: 'failure' },
       ],
     ])
 

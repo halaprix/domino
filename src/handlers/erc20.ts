@@ -12,6 +12,8 @@ import type { Address, MultistepTask, StepCall, StepResult, StepExecutor } from 
 import { runMultistepTasks } from '../core/runMultistepTasks'
 import { erc20Abi } from '../abis/erc'
 
+// ─── Value types ──────────────────────────────────────────────────────────────
+
 export interface Erc20TokenResolution {
   symbol: string | undefined
   decimals: number | undefined
@@ -23,6 +25,30 @@ type Erc20Context = {
   decimals?: number
   balance?: bigint
 }
+
+// ─── Internal helpers ─────────────────────────────────────────────────────────
+
+// Typed accessor helpers — safe coercion from the untyped RawResult.value.
+// These replace `as T` casts; returning undefined instead of producing wrong data
+// when an executor returns an unexpected value type.
+const asString = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined)
+const asBigInt = (v: unknown): bigint | undefined => (typeof v === 'bigint' ? v : undefined)
+const asNumber = (v: unknown): number | undefined => {
+  const n = Number(v)
+  return Number.isFinite(n) ? n : undefined
+}
+
+// Routing key constants — typos in key strings would cause silent routing misses;
+// using a const object makes them a compile error instead.
+const KEYS = {
+  symbol: 'symbol',
+  decimals: 'decimals',
+  balance: 'balance',
+} as const
+
+// ─── Domain layer ─────────────────────────────────────────────────────────────
+// buildErc20Task — pure MultistepTask factory; no orchestration dependency.
+// Safe to use in custom pipelines, test doubles, and non-engine contexts.
 
 export function buildErc20Task(params: {
   token: Address
@@ -38,23 +64,13 @@ export function buildErc20Task(params: {
       if (step !== 1) return []
 
       const calls: StepCall[] = [
-        {
-          key: 'symbol',
-          target: token,
-          abi: erc20Abi,
-          functionName: 'symbol',
-        },
-        {
-          key: 'decimals',
-          target: token,
-          abi: erc20Abi,
-          functionName: 'decimals',
-        },
+        { key: KEYS.symbol, target: token, abi: erc20Abi, functionName: 'symbol' },
+        { key: KEYS.decimals, target: token, abi: erc20Abi, functionName: 'decimals' },
       ]
 
       if (owner) {
         calls.push({
-          key: 'balance',
+          key: KEYS.balance,
           target: token,
           abi: erc20Abi,
           functionName: 'balanceOf',
@@ -68,15 +84,14 @@ export function buildErc20Task(params: {
     consumeStepResults(_step, results: StepResult[]) {
       for (const result of results) {
         if (result.status === 'failure') continue
-        if (result.key === 'symbol') {
-          ctx.symbol = result.value as string
-        }
-        if (result.key === 'decimals') {
-          ctx.decimals = Number(result.value)
-        }
-        if (result.key === 'balance') {
-          ctx.balance = result.value as bigint
-        }
+        // TypeScript narrows result to the success branch here.
+        // exactOptionalPropertyTypes: only assign when the value is defined.
+        const sym = result.key === KEYS.symbol ? asString(result.value) : undefined
+        if (sym !== undefined) ctx.symbol = sym
+        const dec = result.key === KEYS.decimals ? asNumber(result.value) : undefined
+        if (dec !== undefined) ctx.decimals = dec
+        const bal = result.key === KEYS.balance ? asBigInt(result.value) : undefined
+        if (bal !== undefined) ctx.balance = bal
       }
     },
 
@@ -89,6 +104,10 @@ export function buildErc20Task(params: {
     },
   }
 }
+
+// ─── Application layer ────────────────────────────────────────────────────────
+// Convenience resolvers that compose buildErc20Task with runMultistepTasks.
+// Use from engine entry points or when a StepExecutor is already available.
 
 export async function resolveErc20Token(params: {
   client: StepExecutor

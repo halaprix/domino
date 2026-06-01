@@ -3,19 +3,18 @@
  */
 
 import { type PublicClient } from 'viem'
-import type { Abi } from 'viem'
 import type { StepExecutor, StepCall, RawResult } from '../core/types'
 import { MULTICALL3_ADDRESS } from '../abis/multicall3'
 import { makeResolver, type ResolverEngine } from './shared'
 
 export type { Erc20TokenResolution, Erc4626VaultResolution, ResolverEngine } from './shared'
 
-function createViemExecutor(client: PublicClient): StepExecutor {
+export function createViemExecutor(client: PublicClient): StepExecutor {
   return {
     async executeMulticall(calls: StepCall[]): Promise<RawResult[]> {
       const contracts = calls.map((call) => ({
         address: call.target,
-        abi: call.abi as Abi,
+        abi: call.abi,
         functionName: call.functionName,
         args: call.args ?? [],
       }))

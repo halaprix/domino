@@ -97,9 +97,9 @@ export async function runMultistepTasks<TResult>(
 
           const list = perTaskResults[taskIndex]!
           if (result.status === 'success') {
-            list.push({ key, value: result.value })
+            list.push({ status: 'success', key, value: result.value })
           } else {
-            list.push({ key, value: undefined, status: 'failure' })
+            list.push({ status: 'failure', key })
           }
         }
       }

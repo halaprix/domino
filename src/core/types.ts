@@ -6,6 +6,8 @@
  * ethers v5/v6 engines, or any custom backend.
  */
 
+import type { Abi } from 'abitype'
+
 /**
  * A single on-chain call that belongs to one step of one task.
  */
@@ -15,7 +17,7 @@ export interface StepCall {
   /** Target contract address. */
   target: Address
   /** JSON ABI for the call (used by the viem engine; ethers engines ignore it). */
-  abi: readonly unknown[]
+  abi: Abi
   /** Function name to call. */
   functionName: string
   /** Raw arguments — validated by the executor, not here. */
@@ -26,14 +28,14 @@ export interface StepCall {
 export type Address = `0x${string}`
 
 /**
- * Result of a single successful call.
+ * Result of a single call after routing back to its task.
+ * Discriminated on `status` — success carries a value, failure carries optional
+ * revert data. Using a proper union prevents the logically invalid
+ * `{ value: ..., status: 'failure' }` state that an optional flag allowed.
  */
-export interface StepResult {
-  key: string
-  value: unknown
-  /** 'failure' if the call reverted; omitted when it succeeded. */
-  status?: 'failure'
-}
+export type StepResult =
+  | { status: 'success'; key: string; value: unknown }
+  | { status: 'failure'; key: string; error?: unknown }
 
 /**
  * Abstraction over the underlying multicall execution engine.
@@ -45,11 +47,11 @@ export interface StepExecutor {
 
 /**
  * Raw result returned by StepExecutor.executeMulticall before routing.
+ * Discriminated on `status` — failure never carries a value field.
  */
-export interface RawResult {
-  status: 'success' | 'failure'
-  value?: unknown
-}
+export type RawResult =
+  | { status: 'success'; value: unknown }
+  | { status: 'failure'; error?: unknown }
 
 /**
  * A self-contained task that describes a multi-step data retrieval pipeline.

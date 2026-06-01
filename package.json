@@ -119,5 +119,8 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/halaprix/multistep-multicall"
+  },
+  "dependencies": {
+    "abitype": "^1.2.4"
   }
 }

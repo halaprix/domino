@@ -39,6 +39,7 @@ describe('runMultistepTasks', () => {
       },
       consumeStepResults(_step, results) {
         for (const r of results) {
+          if (r.status === 'failure') continue
           if (r.key === 'symbol') ctx.symbol = r.value as string
           if (r.key === 'decimals') ctx.decimals = Number(r.value)
         }
@@ -91,6 +92,7 @@ describe('runMultistepTasks', () => {
       },
       consumeStepResults(_step, results) {
         for (const r of results) {
+          if (r.status === 'failure') continue
           if (r.key === 'symbol') ctx1.symbol = r.value as string
           if (r.key === 'decimals') ctx1.decimals = Number(r.value)
         }
@@ -121,6 +123,7 @@ describe('runMultistepTasks', () => {
       },
       consumeStepResults(_step, results) {
         for (const r of results) {
+          if (r.status === 'failure') continue
           if (r.key === 'symbol') ctx2.symbol = r.value as string
           if (r.key === 'decimals') ctx2.decimals = Number(r.value)
         }
@@ -179,7 +182,8 @@ describe('runMultistepTasks', () => {
       },
       consumeStepResults(step, results) {
         if (step === 1) {
-          capturedBalance = results.find((r) => r.key === 'balance')?.value as bigint
+          const r = results.find((r) => r.key === 'balance' && r.status === 'success')
+          capturedBalance = r?.status === 'success' ? (r.value as bigint) : undefined
         }
       },
       finalize() {
@@ -196,7 +200,7 @@ describe('runMultistepTasks', () => {
     const mockExecutor: StepExecutor = {
       async executeMulticall(_calls: StepCall[]): Promise<any[]> {
         return [
-          { status: 'failure', value: undefined },
+          { status: 'failure' },
           { status: 'success', value: 6n },
         ]
       },
@@ -225,6 +229,7 @@ describe('runMultistepTasks', () => {
       },
       consumeStepResults(_step, results) {
         for (const r of results) {
+          if (r.status === 'failure') continue
           if (r.key === 'symbol') ctx.symbol = r.value as string
           if (r.key === 'decimals') ctx.decimals = Number(r.value)
         }
@@ -274,6 +279,7 @@ describe('runMultistepTasks', () => {
         },
         consumeStepResults(_step, results) {
           for (const r of results) {
+            if (r.status === 'failure') continue
             if (r.key === 't' + capturedTi + '-symbol') ctx.symbol = r.value as string
             if (r.key === 't' + capturedTi + '-decimals') ctx.decimals = Number(r.value)
             if (r.key === 't' + capturedTi + '-balance') ctx.balance = r.value as bigint
