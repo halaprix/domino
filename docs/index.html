@@ -312,7 +312,7 @@ function encodeCall(functionName, abi, args) {
 
 function decodeResult(call, returnData) {
   try {
-    const iface = new ethers.Interface([call]);
+    const iface = new ethers.Interface(call.abi);
     return iface.decodeFunctionResult(call.functionName, returnData);
   } catch {
     return null;
