@@ -6,15 +6,16 @@ import { Contract, utils } from 'ethers-v5'
 import { BigNumber } from 'ethers-v5'
 import { MULTICALL3_ADDRESS, multicall3Abi } from '../abis/multicall3'
 import { ercCombinedAbi } from '../abis/erc'
+import { createEncodedExecutor, type Aggregate3Contract, type EncodingInterface } from './shared'
 import {
-  createEncodedExecutor,
+  MulticallResolver,
   makeResolver,
-  type Aggregate3Contract,
-  type EncodingInterface,
   type ResolverEngine as ResolverEngineGeneric,
-} from './shared'
+} from './resolver'
+import type { StepExecutor } from '../core/types'
 
-export type { Erc20TokenResolution, Erc4626VaultResolution } from './shared'
+export type { Erc20TokenResolution, Erc4626VaultResolution } from './resolver'
+export { MulticallResolver } from './resolver'
 
 /** ethers v5 accepts plain `string` addresses (no `0x${string}` branding). */
 export type ResolverEngine = ResolverEngineGeneric<string>
@@ -35,11 +36,11 @@ function normalizeEthersV5Value(value: unknown): unknown {
 }
 
 /**
- * Create an ethers v5 ResolverEngine.
+ * Create an ethers v5 StepExecutor.
  *
- * @param provider - ethers v5 Provider
- * @param multicall3Contract - optional pre-configured Multicall3 Contract
- * @param iface - optional ethers Interface
+ * Preferred usage:
+ *   const executor = createEthersV5Executor(provider)
+ *   const resolver = new MulticallResolver(executor)
  *
  * @remarks
  * **StepCall.abi limitation:** ethers executors encode calls via
@@ -48,19 +49,29 @@ function normalizeEthersV5Value(value: unknown): unknown {
  * the single shared `iface`. If you pass a custom `iface`, include the
  * full combined set of functions your tasks will call.
  */
+export function createEthersV5Executor(
+  provider: import('ethers-v5').providers.Provider,
+  multicall3Contract?: Contract,
+  iface?: utils.Interface,
+): StepExecutor {
+  const mc3 = multicall3Contract ?? new Contract(MULTICALL3_ADDRESS, multicall3Abi, provider)
+  const abiInterface = iface ?? new utils.Interface([...ercCombinedAbi])
+
+  return createEncodedExecutor(
+    mc3 as unknown as Aggregate3Contract,
+    abiInterface as unknown as EncodingInterface,
+    normalizeEthersV5Value,
+  )
+}
+
+/**
+ * Convenience factory: creates an ethers v5 executor and wraps it in a MulticallResolver.
+ * Equivalent to: new MulticallResolver(createEthersV5Executor(provider, ...))
+ */
 export function createResolver(
   provider: import('ethers-v5').providers.Provider,
   multicall3Contract?: Contract,
   iface?: utils.Interface,
 ): ResolverEngine {
-  const mc3 = multicall3Contract ?? new Contract(MULTICALL3_ADDRESS, multicall3Abi, provider)
-  const abiInterface = iface ?? new utils.Interface([...ercCombinedAbi])
-
-  const executor = createEncodedExecutor(
-    mc3 as unknown as Aggregate3Contract,
-    abiInterface as unknown as EncodingInterface,
-    normalizeEthersV5Value,
-  )
-
-  return makeResolver<string>(executor)
+  return makeResolver<string>(createEthersV5Executor(provider, multicall3Contract, iface))
 }

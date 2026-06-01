@@ -1,24 +1,13 @@
 /**
- * Shared engine plumbing.
+ * Shared engine infrastructure — encoding, decoding, and Multicall3 plumbing.
  *
- * Every engine (viem, ethers v5/v6) differs only in how it turns StepCalls into
- * on-chain results — i.e. its `StepExecutor`. The four `resolveX` methods and the
- * owner-compaction boilerplate are identical, so they live here once.
+ * This module is pure infrastructure: no handler imports, no domain knowledge.
+ * It is used by the ethers v5/v6 engines only (viem uses client.multicall directly).
+ *
+ * Application-layer resolver logic lives in engines/resolver.ts.
  */
 
-import type { Address, StepCall, StepExecutor, RawResult } from '../core/types'
-import {
-  resolveErc20Token,
-  resolveErc20TokensBulk,
-  type Erc20TokenResolution,
-} from '../handlers/erc20'
-import {
-  resolveErc4626Vault,
-  resolveErc4626VaultsBulk,
-  type Erc4626VaultResolution,
-} from '../handlers/erc4626'
-
-export type { Erc20TokenResolution, Erc4626VaultResolution }
+import type { StepCall, StepExecutor, RawResult } from '../core/types'
 
 /** Minimal structural view of an ethers Interface (v5 or v6). */
 export interface EncodingInterface {
@@ -76,74 +65,6 @@ export function createEncodedExecutor(
         } catch {
           return { status: 'failure' as const }
         }
-      })
-    },
-  }
-}
-
-/**
- * Uniform resolver API exposed by every engine.
- *
- * `TAddr` is the address representation the engine accepts — `Address`
- * (`0x${string}`) for viem/ethers v6, plain `string` for ethers v5.
- */
-export interface ResolverEngine<TAddr extends string = Address> {
-  resolveErc20(params: { token: TAddr; owner?: TAddr }): Promise<Erc20TokenResolution>
-  resolveErc20Bulk(params: {
-    entries: { token: TAddr; owner?: TAddr }[]
-    batchSize?: number
-  }): Promise<Erc20TokenResolution[]>
-  resolveErc4626(params: { vault: TAddr; owner?: TAddr }): Promise<Erc4626VaultResolution>
-  resolveErc4626Bulk(params: {
-    entries: { vault: TAddr; owner?: TAddr }[]
-    batchSize?: number
-  }): Promise<Erc4626VaultResolution[]>
-}
-
-// Build task params while omitting `owner` when absent — required under
-// exactOptionalPropertyTypes, which forbids an explicit `owner: undefined`.
-function erc20Params(token: string, owner?: string): { token: Address; owner?: Address } {
-  return owner != null
-    ? { token: token as Address, owner: owner as Address }
-    : { token: token as Address }
-}
-
-function erc4626Params(vault: string, owner?: string): { vault: Address; owner?: Address } {
-  return owner != null
-    ? { vault: vault as Address, owner: owner as Address }
-    : { vault: vault as Address }
-}
-
-/**
- * Wire a `StepExecutor` up to the standard four resolver methods.
- * This is the entire body of every engine's `createResolver` once the
- * engine-specific executor has been constructed.
- */
-export function makeResolver<TAddr extends string = Address>(
-  executor: StepExecutor,
-): ResolverEngine<TAddr> {
-  return {
-    async resolveErc20({ token, owner }) {
-      return resolveErc20Token({ client: executor, ...erc20Params(token, owner) })
-    },
-
-    async resolveErc20Bulk({ entries, batchSize }) {
-      return resolveErc20TokensBulk({
-        client: executor,
-        entries: entries.map((e) => erc20Params(e.token, e.owner)),
-        ...(batchSize !== undefined ? { batchSize } : {}),
-      })
-    },
-
-    async resolveErc4626({ vault, owner }) {
-      return resolveErc4626Vault({ client: executor, ...erc4626Params(vault, owner) })
-    },
-
-    async resolveErc4626Bulk({ entries, batchSize }) {
-      return resolveErc4626VaultsBulk({
-        client: executor,
-        entries: entries.map((e) => erc4626Params(e.vault, e.owner)),
-        ...(batchSize !== undefined ? { batchSize } : {}),
       })
     },
   }

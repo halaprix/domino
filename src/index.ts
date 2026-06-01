@@ -10,6 +10,10 @@ export type {
 } from './core/types'
 export type { BatchOptions } from './core/runMultistepTasks'
 
+// Application-layer resolver (engine-agnostic)
+export { MulticallResolver } from './engines/resolver'
+export type { ResolverEngine } from './engines/resolver'
+
 // ERC20 handler
 export { buildErc20Task, resolveErc20Token, resolveErc20TokensBulk } from './handlers/erc20'
 export type { Erc20TokenResolution } from './handlers/erc20'
@@ -18,8 +22,7 @@ export type { Erc20TokenResolution } from './handlers/erc20'
 export { buildErc4626Task, resolveErc4626Vault, resolveErc4626VaultsBulk } from './handlers/erc4626'
 export type { Erc4626VaultResolution } from './handlers/erc4626'
 
-// Engines are NOT re-exported from root to keep the main bundle small.
-// Import from subpaths instead:
-//   import { createResolver } from '@halaprix/multistep-multicall/engines/viem'
-//   import { createResolver } from '@halaprix/multistep-multicall/engines/ethers-v6'
-//   import { createResolver } from '@halaprix/multistep-multicall/engines/ethers-v5'
+// Engines export executors + createResolver convenience from their subpaths:
+//   import { createViemExecutor, createResolver } from '@halaprix/multistep-multicall/engines/viem'
+//   import { createEthersV6Executor, createResolver } from '@halaprix/multistep-multicall/engines/ethers-v6'
+//   import { createEthersV5Executor, createResolver } from '@halaprix/multistep-multicall/engines/ethers-v5'

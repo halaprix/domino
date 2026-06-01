@@ -5,10 +5,18 @@
 import { type PublicClient } from 'viem'
 import type { StepExecutor, StepCall, RawResult } from '../core/types'
 import { MULTICALL3_ADDRESS } from '../abis/multicall3'
-import { makeResolver, type ResolverEngine } from './shared'
+import { MulticallResolver, makeResolver, type ResolverEngine } from './resolver'
 
-export type { Erc20TokenResolution, Erc4626VaultResolution, ResolverEngine } from './shared'
+export type { Erc20TokenResolution, Erc4626VaultResolution, ResolverEngine } from './resolver'
+export { MulticallResolver } from './resolver'
 
+/**
+ * Create a viem-backed StepExecutor.
+ *
+ * Preferred usage:
+ *   const executor = createViemExecutor(client)
+ *   const resolver = new MulticallResolver(executor)
+ */
 export function createViemExecutor(client: PublicClient): StepExecutor {
   return {
     async executeMulticall(calls: StepCall[]): Promise<RawResult[]> {
@@ -40,6 +48,10 @@ export function createViemExecutor(client: PublicClient): StepExecutor {
   }
 }
 
+/**
+ * Convenience factory: creates a viem executor and wraps it in a MulticallResolver.
+ * Equivalent to: new MulticallResolver(createViemExecutor(client))
+ */
 export function createResolver(client: PublicClient): ResolverEngine {
   return makeResolver(createViemExecutor(client))
 }
