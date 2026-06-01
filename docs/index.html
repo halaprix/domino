@@ -6,9 +6,7 @@
 <title>domino — sequential on-chain reads</title>
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
 <script src="https://cdn.jsdelivr.net/npm/ethers@6.9.0/dist/ethers.umd.min.js"></script>
-<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600;700&family=JetBrains+Mono:wght@400;600&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
-<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;family=JetBrains+Mono:wght@100..900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=JetBrains+Mono:wght@100..900&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
 <script id="tailwind-config">
         tailwind.config = {
             darkMode: "class",
@@ -124,11 +122,11 @@
 <nav class="fixed top-0 w-full z-50 flex justify-between items-center px-gutter max-w-container-max mx-auto h-16 bg-background border-b border-outline-variant transition-all duration-200 ease-in-out">
 <div class="font-headline-md text-headline-md font-bold text-on-background tracking-tight">domino</div>
 <div class="hidden md:flex gap-md items-center">
-<a class="text-on-surface-variant hover:text-primary transition-colors font-body-md text-body-md" href="#">Docs</a>
-<a class="text-on-surface-variant hover:text-primary transition-colors font-body-md text-body-md" href="#">Examples</a>
-<a class="text-on-surface-variant hover:text-primary transition-colors font-body-md text-body-md" href="#">Benchmarks</a>
-<a class="text-on-surface-variant hover:text-primary transition-colors font-body-md text-body-md" href="#">GitHub</a>
-<span class="ml-sm font-label-caps text-label-caps bg-primary/10 text-primary px-2 py-1 rounded">v1.2.0</span>
+<a class="text-on-surface-variant hover:text-primary transition-colors font-body-md text-body-md" href="https://github.com/halaprix/domino/blob/main/docs/api-reference.md">Docs</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors font-body-md text-body-md" href="#demo">Demo</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors font-body-md text-body-md" href="https://github.com/halaprix/domino/blob/main/docs/benchmarks.md">Benchmarks</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors font-body-md text-body-md" href="https://github.com/halaprix/domino">GitHub</a>
+<span class="ml-sm font-label-caps text-label-caps bg-primary/10 text-primary px-2 py-1 rounded">v0.1.0</span>
 </div>
 </nav>
 <main class="flex-grow pt-32 pb-xl px-gutter max-w-container-max mx-auto w-full">
@@ -145,7 +143,7 @@
                 domino solves the N×M RPC problem. Sequential, self-triggering on-chain reads — resolved in M multicalls, not N×M individual calls.
             </p>
 <div class="flex flex-col sm:flex-row gap-sm justify-center items-center">
-<a class="px-6 py-3 bg-inverse-primary text-white rounded-md font-body-md text-body-md font-semibold glow-hover transition-all" href="#">Get started</a>
+<a class="px-6 py-3 bg-inverse-primary text-white rounded-md font-body-md text-body-md font-semibold glow-hover transition-all" href="https://github.com/halaprix/domino#readme">Get started</a>
 <a class="px-6 py-3 border border-outline-variant hover:border-primary hover:text-primary text-on-surface rounded-md font-body-md text-body-md transition-all flex items-center gap-2" href="#demo"><span class="material-symbols-outlined text-[18px]">rocket_launch</span> Try the demo</a>
 </div>
 </section>
@@ -557,13 +555,12 @@ render();
 <!-- Footer -->
 <footer class="w-full py-xl px-gutter max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-md bg-surface-container-lowest border-t border-outline-variant mt-auto">
 <div class="font-label-caps text-label-caps text-on-surface-variant">
-            © 2024 Multistep-Multicall. Licensed under MIT. Built by halaprix.
+            © 2026 domino by halaprix. Licensed under MIT.
         </div>
 <div class="flex gap-md font-label-caps text-label-caps">
-<a class="text-on-surface-variant hover:text-primary transition-colors" href="#">Security</a>
-<a class="text-on-surface-variant hover:text-primary transition-colors" href="#">Changelog</a>
-<a class="text-on-surface-variant hover:text-primary transition-colors" href="#">Community</a>
-<a class="text-on-surface-variant hover:text-primary transition-colors" href="#">Status</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors" href="https://github.com/halaprix/domino/blob/main/CHANGELOG.md">Changelog</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors" href="https://www.npmjs.com/package/@halaprix/domino">npm</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors" href="https://github.com/halaprix/domino/issues">Issues</a>
 </div>
 </footer>
 </body></html>
