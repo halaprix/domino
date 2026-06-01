@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { runMultistepTasks } from '../core/runMultistepTasks'
+import { resolveErc20TokensBulk } from '../handlers/erc20'
 import type { MultistepTask, StepCall, StepResult, StepExecutor } from '../core/types'
 
 describe('runMultistepTasks', () => {
@@ -310,7 +311,7 @@ describe('runMultistepTasks', () => {
     }
 
     // 100 calls should fit in 1 batch with the default
-    const tasks: MultistepTask<{}>[] = Array.from({ length: 100 }, (_, i) => ({
+    const tasks: MultistepTask<Record<string, never>>[] = Array.from({ length: 100 }, (_, i) => ({
       maxStep: 1,
       buildStepCalls(step) {
         if (step !== 1) return []
@@ -334,7 +335,7 @@ describe('runMultistepTasks', () => {
       },
     }
 
-    const task: MultistepTask<{}> = {
+    const task: MultistepTask<Record<string, never>> = {
       maxStep: 1,
       buildStepCalls(step) {
         if (step !== 1) return []
@@ -350,5 +351,64 @@ describe('runMultistepTasks', () => {
     await expect(runMultistepTasks(mockExecutor, [task])).rejects.toThrow(
       'StepExecutor returned 1 results for 2 calls — length mismatch',
     )
+  })
+
+  it('rejects an invalid batchSize instead of hanging or misrouting', async () => {
+    const mockExecutor: StepExecutor = {
+      async executeMulticall(calls: StepCall[]): Promise<any[]> {
+        return calls.map(() => ({ status: 'success' as const, value: 'x' }))
+      },
+    }
+
+    const makeTask = (): MultistepTask<Record<string, never>> => ({
+      maxStep: 1,
+      buildStepCalls(step) {
+        if (step !== 1) return []
+        return [
+          { key: 'a', target: '0xA0b86991c6218b36c1d19D4a2e9Eb004C35d5Cc4', abi: [], functionName: 'symbol' },
+        ]
+      },
+      consumeStepResults() {},
+      finalize() {
+        return {}
+      },
+    })
+
+    // 0 / negative would previously spin forever (batchStart never advances);
+    // 1.5 would index mapping[1.5] -> undefined and silently drop results.
+    for (const bad of [0, -1, 1.5]) {
+      await expect(
+        runMultistepTasks(mockExecutor, [makeTask()], { batchSize: bad }),
+      ).rejects.toThrow('batchSize must be a positive integer')
+    }
+  })
+
+  it('forwards batchSize through resolveErc20TokensBulk to the executor', async () => {
+    const batchCounts: number[] = []
+    const mockExecutor: StepExecutor = {
+      async executeMulticall(calls: StepCall[]): Promise<any[]> {
+        batchCounts.push(calls.length)
+        return calls.map((c) =>
+          c.key === 'decimals'
+            ? { status: 'success' as const, value: 6 }
+            : { status: 'success' as const, value: 'TOK' },
+        )
+      },
+    }
+
+    // 3 tokens x 2 calls (symbol, decimals) = 6 calls; batchSize 2 -> 3 batches.
+    const results = await resolveErc20TokensBulk({
+      client: mockExecutor,
+      entries: [
+        { token: '0xA0b86991c6218b36c1d19D4a2e9Eb004C35d5Cc4' },
+        { token: '0xB0b86991c6218b36c1d19D4a2e9Eb004C35d5Cc4' },
+        { token: '0xC0b86991c6218b36c1d19D4a2e9Eb004C35d5Cc4' },
+      ],
+      batchSize: 2,
+    })
+
+    expect(batchCounts).toEqual([2, 2, 2])
+    expect(results).toHaveLength(3)
+    expect(results[0]).toEqual({ symbol: 'TOK', decimals: 6, balance: undefined })
   })
 })

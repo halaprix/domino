@@ -105,6 +105,7 @@ export async function resolveErc20Token(params: {
 export async function resolveErc20TokensBulk(params: {
   client: StepExecutor
   entries: { token: Address; owner?: Address }[]
+  batchSize?: number
 }): Promise<Erc20TokenResolution[]> {
   if (params.entries.length === 0) return []
   const executor = params.client
@@ -113,5 +114,9 @@ export async function resolveErc20TokensBulk(params: {
       ? buildErc20Task({ token: e.token, owner: e.owner as Address })
       : buildErc20Task({ token: e.token })
   })
-  return runMultistepTasks(executor, tasks)
+  return runMultistepTasks(
+    executor,
+    tasks,
+    params.batchSize !== undefined ? { batchSize: params.batchSize } : undefined,
+  )
 }

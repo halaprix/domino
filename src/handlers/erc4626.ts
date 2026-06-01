@@ -146,6 +146,7 @@ export async function resolveErc4626Vault(params: {
 export async function resolveErc4626VaultsBulk(params: {
   client: StepExecutor
   entries: { vault: Address; owner?: Address }[]
+  batchSize?: number
 }): Promise<Erc4626VaultResolution[]> {
   if (params.entries.length === 0) return []
   const executor = params.client
@@ -154,5 +155,9 @@ export async function resolveErc4626VaultsBulk(params: {
       ? buildErc4626Task({ vault: e.vault, owner: e.owner as Address })
       : buildErc4626Task({ vault: e.vault })
   })
-  return runMultistepTasks(executor, tasks)
+  return runMultistepTasks(
+    executor,
+    tasks,
+    params.batchSize !== undefined ? { batchSize: params.batchSize } : undefined,
+  )
 }

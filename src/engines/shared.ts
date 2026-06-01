@@ -91,10 +91,12 @@ export interface ResolverEngine<TAddr extends string = Address> {
   resolveErc20(params: { token: TAddr; owner?: TAddr }): Promise<Erc20TokenResolution>
   resolveErc20Bulk(params: {
     entries: { token: TAddr; owner?: TAddr }[]
+    batchSize?: number
   }): Promise<Erc20TokenResolution[]>
   resolveErc4626(params: { vault: TAddr; owner?: TAddr }): Promise<Erc4626VaultResolution>
   resolveErc4626Bulk(params: {
     entries: { vault: TAddr; owner?: TAddr }[]
+    batchSize?: number
   }): Promise<Erc4626VaultResolution[]>
 }
 
@@ -125,10 +127,11 @@ export function makeResolver<TAddr extends string = Address>(
       return resolveErc20Token({ client: executor, ...erc20Params(token, owner) })
     },
 
-    async resolveErc20Bulk({ entries }) {
+    async resolveErc20Bulk({ entries, batchSize }) {
       return resolveErc20TokensBulk({
         client: executor,
         entries: entries.map((e) => erc20Params(e.token, e.owner)),
+        ...(batchSize !== undefined ? { batchSize } : {}),
       })
     },
 
@@ -136,10 +139,11 @@ export function makeResolver<TAddr extends string = Address>(
       return resolveErc4626Vault({ client: executor, ...erc4626Params(vault, owner) })
     },
 
-    async resolveErc4626Bulk({ entries }) {
+    async resolveErc4626Bulk({ entries, batchSize }) {
       return resolveErc4626VaultsBulk({
         client: executor,
         entries: entries.map((e) => erc4626Params(e.vault, e.owner)),
+        ...(batchSize !== undefined ? { batchSize } : {}),
       })
     },
   }

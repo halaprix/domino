@@ -24,7 +24,7 @@ export interface BatchOptions {
    *
    * Multicall3 aggregate3 has a per-call gas limit. When a single step has
    * more than this many calls, it is split into sequential batches.
-   * Default: 100.
+   * Default: 100. Must be a positive integer — anything else throws.
    */
   batchSize?: number
 }
@@ -46,6 +46,9 @@ export async function runMultistepTasks<TResult>(
 
   const maxStep = tasks.reduce((max, task) => (task.maxStep > max ? task.maxStep : max), 0)
   const batchSize = options?.batchSize ?? 100
+  if (!Number.isInteger(batchSize) || batchSize < 1) {
+    throw new Error(`batchSize must be a positive integer, got ${batchSize}`)
+  }
 
   for (let step = 1; step <= maxStep; step++) {
     const calls: StepCall[] = []
