@@ -273,9 +273,7 @@ const MULTICALL3_ADDRESS = '0xcA11bde05977b3631167028862bE2a173976CA11';
 // FSM State Machine
 // ============================================================
 const FSM_STATES = {
-  DISCONNECTED: 'disconnected',
-  CONNECTING: 'connecting',
-  CONNECTED: 'connected',
+  READY: 'ready',
   DEMO_RUNNING: 'demo_running',
   DEMO_SUCCESS: 'demo_success',
   DEMO_ERROR: 'demo_error'
@@ -322,44 +320,24 @@ function decodeResult(call, returnData) {
 // ============================================================
 // Demo FSM
 // ============================================================
-let currentState = FSM_STATES.DISCONNECTED;
-let walletAddress = null;
-let executor = null;
+// Read-only demo — no wallet needed. Uses a public mainnet RPC (eth_call only).
+// Fallbacks: https://cloudflare-eth.com, https://rpc.ankr.com/eth
+const PUBLIC_RPC = 'https://eth.llamarpc.com';
+
+let currentState = FSM_STATES.READY;
+let executor = new Multicall3Executor(new ethers.JsonRpcProvider(PUBLIC_RPC));
 let currentStep = 0;
 let stepResults = [];
 let vaultAddress = null;
 let tokenAddress = null;
-
-async function connectWallet() {
-  setState(FSM_STATES.CONNECTING);
-  try {
-    if (!window.ethereum) {
-      throw new Error('No wallet detected. Please install MetaMask or another Web3 wallet.');
-    }
-    const provider = new ethers.BrowserProvider(window.ethereum);
-    await provider.send('eth_requestAccounts', []);
-    const signer = await provider.getSigner();
-    walletAddress = await signer.getAddress();
-    executor = new Multicall3Executor(provider);
-    setState(FSM_STATES.CONNECTED);
-  } catch (err) {
-    renderError('Wallet connection failed: ' + err.message);
-    setState(FSM_STATES.DISCONNECTED);
-  }
-}
-
-function disconnectWallet() {
-  walletAddress = null;
-  executor = null;
-  resetDemo();
-  setState(FSM_STATES.DISCONNECTED);
-}
 
 function resetDemo() {
   currentStep = 0;
   stepResults = [];
   vaultAddress = null;
   tokenAddress = null;
+  const logs = document.getElementById('step-logs');
+  if (logs) logs.innerHTML = '';
 }
 
 function setState(state) {
@@ -368,7 +346,7 @@ function setState(state) {
 }
 
 async function runDemo(vaultAddr) {
-  if (!executor) return;
+  if (!vaultAddr || !vaultAddr.startsWith('0x')) return;
   resetDemo();
   vaultAddress = vaultAddr;
   setState(FSM_STATES.DEMO_RUNNING);
@@ -427,42 +405,17 @@ function render() {
   let html = '';
 
   switch (currentState) {
-    case FSM_STATES.DISCONNECTED:
-      html = `
-        <div class="flex flex-col items-center gap-sm py-lg">
-          <div class="text-on-surface-variant text-center mb-sm">
-            Connect your wallet to run the live ERC4626 demo
-          </div>
-          <button onclick="window.demoFSM.connectWallet()" class="px-6 py-3 bg-inverse-primary text-white rounded-md font-body-md font-semibold glow-hover transition-all flex items-center gap-2">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>
-            Connect Wallet
-          </button>
-        </div>`;
-      break;
-
-    case FSM_STATES.CONNECTING:
-      html = `
-        <div class="flex flex-col items-center gap-sm py-lg">
-          <div class="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full"></div>
-          <div class="text-on-surface-variant">Connecting wallet...</div>
-        </div>`;
-      break;
-
-    case FSM_STATES.CONNECTED:
+    case FSM_STATES.READY:
     case FSM_STATES.DEMO_RUNNING:
     case FSM_STATES.DEMO_SUCCESS:
     case FSM_STATES.DEMO_ERROR:
-      const shortAddr = walletAddress ? walletAddress.slice(0, 6) + '...' + walletAddress.slice(-4) : '';
       html = `
         <div class="flex flex-col gap-md">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-2">
               <div class="w-2 h-2 bg-green-500 rounded-full"></div>
-              <span class="font-label-caps text-label-caps text-on-surface-variant">${shortAddr}</span>
+              <span class="font-label-caps text-label-caps text-on-surface-variant">live · mainnet · public RPC</span>
             </div>
-            <button onclick="window.demoFSM.disconnectWallet()" class="text-on-surface-variant hover:text-error transition-colors font-label-caps text-label-caps">
-              Disconnect
-            </button>
           </div>
           ${renderDemoForm()}
           ${renderStepLogs()}
@@ -512,7 +465,6 @@ function renderSuccessCard() {
 }
 
 function renderStepLogs() {
-  if (currentState === FSM_STATES.DISCONNECTED || currentState === FSM_STATES.CONNECTING) return '';
 
   return `
     <div class="space-y-xs" id="step-logs">
@@ -580,11 +532,7 @@ function renderError(message) {
 }
 
 // Expose to global for onclick handlers
-window.demoFSM = {
-  connectWallet,
-  disconnectWallet,
-  runDemo
-};
+window.demoFSM = { runDemo };
 
 // Initial render
 render();
