@@ -87,6 +87,10 @@ export class MulticallResolver<TAddr extends string = Address>
     return this._executor
   }
 
+  /**
+   * @see runMultistepTasks for step-count batching behaviour — tasks with
+   * different maxStep values all finalize together after the global max step.
+   */
   run<T>(tasks: MultistepTask<T>[], options?: BatchOptions): Promise<T[]> {
     return runMultistepTasks(this._executor, tasks, options)
   }

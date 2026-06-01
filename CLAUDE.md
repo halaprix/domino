@@ -143,3 +143,4 @@ npm run build     # ensure typecheck + build succeeds
 - ABIs live in `src/abis/erc.ts` as **JSON ABI objects** (not human-readable strings) — viem's encoder requires parsed ABI; ethers accepts the same JSON.
 - When adding a new token standard (e.g. ERC-721), add a `src/handlers/<name>.ts` exporting both a `build<Name>Task()` factory and `resolve<Name>()` convenience functions, following the ERC20/ERC4626 pattern.
 - All engines must produce identical result shapes for the same inputs — covered by `integration.test.ts`; extend it for new engines/standards.
+- **Mixed-depth batches:** tasks with a shorter `maxStep` still wait for the longest task before `finalize()` is called. This is by design — batching them together saves RPC round-trips. If early results are needed, split into separate `runMultistepTasks` calls (see JSDoc on `runMultistepTasks` for the trade-off).

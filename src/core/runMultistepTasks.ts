@@ -36,6 +36,23 @@ export interface BatchOptions {
  * @param tasks - Array of MultistepTask instances
  * @param options - Optional batching options
  * @returns Array of finalized results in same order as input tasks
+ *
+ * @remarks
+ * **Mixed step-counts:** all tasks finalize together after the global maxStep
+ * completes. A task with `maxStep: 1` mixed with tasks that have `maxStep: 2`
+ * contributes no calls in step 2, but its result is still not returned until
+ * all steps finish. This is intentional — batching both groups at step 1 saves
+ * one RPC round-trip compared to two separate calls.
+ *
+ * If you genuinely need the shorter tasks' results before the longer ones finish,
+ * run them in separate `runMultistepTasks` calls (costs one extra round-trip):
+ * ```ts
+ * const [erc20s, vaults] = await Promise.all([
+ *   runMultistepTasks(executor, erc20Tasks),   // 1 round-trip
+ *   runMultistepTasks(executor, erc4626Tasks), // 2 round-trips
+ * ])
+ * // Total: 2 round-trips instead of 2 (same!) — but results arrive separately
+ * ```
  */
 export async function runMultistepTasks<TResult>(
   executor: StepExecutor,
