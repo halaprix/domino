@@ -322,7 +322,7 @@ function decodeResult(call, returnData) {
 // ============================================================
 // Read-only demo — no wallet needed. Uses a public mainnet RPC (eth_call only).
 // Fallbacks: https://cloudflare-eth.com, https://rpc.ankr.com/eth
-const PUBLIC_RPC = 'https://eth.llamarpc.com';
+const PUBLIC_RPC = 'https://0xrpc.io/eth';
 
 let currentState = FSM_STATES.READY;
 let executor = new Multicall3Executor(new ethers.JsonRpcProvider(PUBLIC_RPC));
