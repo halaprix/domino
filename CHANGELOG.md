@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Breaking
+
+- **Package renamed** from `@halaprix/multistep-multicall` to `@halaprix/domino`.
+- **Engine subpath imports flattened**: `…/engines/viem` → `…/viem`, `…/engines/ethers-v6` → `…/ethers-v6`, `…/engines/ethers-v5` → `…/ethers-v5`.
+
 ### Added
 
 - **Configurable batch size** (`batchSize` option on `runMultistepTasks`) — splits oversized steps into sequential batches to stay under Multicall3 gas limits. Default: 100 calls per batch.
@@ -35,7 +40,7 @@ All notable changes to this project will be documented in this file.
 - **ERC20 handler** — `buildErc20Task`, `resolveErc20Token`, `resolveErc20TokensBulk`
 - **ERC4626 handler** — `buildErc4626Task`, `resolveErc4626Vault`, `resolveErc4626VaultsBulk`
   - 2-step pipeline: vault metadata → convertToAssets (when owner provided)
-- **Viem engine** (`@halaprix/multistep-multicall/engines/viem`) — via `client.multicall`
+- **Viem engine** (`@halaprix/domino/viem`) — via `client.multicall`
 - **Ethers v6 engine** (`.../engines/ethers-v6`) — via Multicall3 `aggregate3`
 - **Ethers v5 engine** (`.../engines/ethers-v5`) — via Multicall3 `aggregate3`
 - Tree-shakeable engine entry points (import one, the other two are excluded)
@@ -47,4 +52,4 @@ All notable changes to this project will be documented in this file.
 - Bundle size regression test (`bundle-size.test.ts`)
 - 37 unit + engine integration tests
 
-[0.1.0]: https://github.com/halaprix/multistep-multicall/releases/tag/v0.1.0
+[0.1.0]: https://github.com/halaprix/domino/releases/tag/v0.1.0

@@ -1,5 +1,5 @@
 {
-  "name": "@halaprix/multistep-multicall",
+  "name": "@halaprix/domino",
   "version": "0.1.0",
   "private": false,
   "files": [
@@ -9,7 +9,7 @@
   ],
   "type": "module",
   "sideEffects": false,
-  "description": "Batched on-chain data resolution for sequential, state-dependent reads. FSM executor for Multicall3 — reduces N×M RPC calls to M multicalls.",
+  "description": "Sequential, self-triggering on-chain reads. FSM executor for Multicall3 — reduces N×M RPC calls to M multicalls.",
   "license": "MIT",
   "publishConfig": {
     "access": "public"
@@ -35,7 +35,7 @@
         "default": "./dist/index.cjs"
       }
     },
-    "./engines/viem": {
+    "./viem": {
       "import": {
         "types": "./dist/engines/viem.d.ts",
         "default": "./dist/engines/viem.js"
@@ -45,7 +45,7 @@
         "default": "./dist/engines/viem.cjs"
       }
     },
-    "./engines/ethers-v6": {
+    "./ethers-v6": {
       "import": {
         "types": "./dist/engines/ethers-v6.d.ts",
         "default": "./dist/engines/ethers-v6.js"
@@ -55,7 +55,7 @@
         "default": "./dist/engines/ethers-v6.cjs"
       }
     },
-    "./engines/ethers-v5": {
+    "./ethers-v5": {
       "import": {
         "types": "./dist/engines/ethers-v5.d.ts",
         "default": "./dist/engines/ethers-v5.js"
@@ -114,7 +114,9 @@
     "ethers",
     "blockchain",
     "rpc",
-    "batch"
+    "batch",
+    "sequential",
+    "domino"
   ],
   "repository": {
     "type": "git",

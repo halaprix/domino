@@ -5,20 +5,20 @@
 Each engine entry point is a thin wrapper. The library you choose (viem or ethers) is a peer dependency you already have, so it is **not** bundled. Importing one engine excludes the other two.
 
 ```typescript
-import { createResolver } from "@halaprix/multistep-multicall/engines/viem";
+import { createResolver } from "@halaprix/domino/viem";
 // ethers v5/v6 are not pulled in
 ```
 
 | Entry point | Wrapper (gzip) | Peer dependency (not bundled) |
 |---|---|---|
-| `.../engines/viem` | ~2.1 KB | viem |
-| `.../engines/ethers-v6` | ~2.3 KB | ethers v6 |
-| `.../engines/ethers-v5` | ~2.4 KB | ethers v5 |
+| `@halaprix/domino/viem` | ~2.1 KB | viem |
+| `@halaprix/domino/ethers-v6` | ~2.3 KB | ethers v6 |
+| `@halaprix/domino/ethers-v5` | ~2.4 KB | ethers v5 |
 | `...` (root handlers, no engine) | ~1.8 KB | none |
 
 ## Compared to Alternatives
 
-| Feature | multistep-multicall | ethereum-multicall | viem native multicall |
+| Feature | domino | ethereum-multicall | viem native multicall |
 |---|---|---|---|
 | Sequential steps | ✅ FSM | ❌ | ❌ |
 | 2-step vault resolution | ✅ | ❌ | ❌ |

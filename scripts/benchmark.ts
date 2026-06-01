@@ -1,5 +1,5 @@
 /**
- * Benchmark script: naive sequential RPC vs multistep-multicall.
+ * Benchmark script: naive sequential RPC vs domino.
  *
  * Measures:
  *   - RPC call count  (how many network round-trips)
@@ -79,7 +79,7 @@ function calcRps(stats: CallStats, wallMs: number): number {
 // ---------------------------------------------------------------------------
 
 /**
- * Simulates what a developer does without multistep-multicall:
+ * Simulates what a developer does without domino:
  * one RPC call per function per token/vault, in sequence.
  *
  * ERC20 per token (no owner): 2 calls (symbol, decimals)
@@ -259,7 +259,7 @@ async function benchmarkScenario(
 }
 
 async function main() {
-  console.log('\nmultistep-multicall benchmark\n')
+  console.log('\ndomino benchmark\n')
   console.log('Configuration:')
   console.log('  RPC latency simulation: 0ms (pure CPU, deterministic)')
   console.log('  Metrics: RPC call count, wall time (ms)\n')

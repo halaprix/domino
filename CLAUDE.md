@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-`multistep-multicall` is a TypeScript library that wraps Multicall3 with an FSM executor for **sequential, state-dependent contract reads**. The core insight: standard multicall libraries only batch calls known upfront. This library solves the "step N+1 depends on step N results" pattern — reducing N×M RPC calls to M multicalls.
+`domino` is a TypeScript library that wraps Multicall3 with an FSM executor for **sequential, state-dependent contract reads**. The core insight: standard multicall libraries only batch calls known upfront. This library solves the "step N+1 depends on step N results" pattern — reducing N×M RPC calls to M multicalls.
 
 ## Architecture
 
@@ -94,7 +94,7 @@ interface MultistepTask<TResult> {
 ### Viem (primary, recommended)
 ```typescript
 import { createPublicClient, http } from "viem";
-import { createResolver } from "@halaprix/multistep-multicall/engines/viem";
+import { createResolver } from "@halaprix/domino/viem";
 
 const client = createPublicClient({ chain: mainnet, transport: http() });
 const resolver = createResolver(client);
@@ -106,13 +106,13 @@ const tokens = await resolver.resolveErc20Bulk({ entries: [{ token: "0x..." }, .
 
 ### Ethers v6
 ```typescript
-import { createResolver } from "@halaprix/multistep-multicall/engines/ethers-v6";
+import { createResolver } from "@halaprix/domino/ethers-v6";
 const resolver = createResolver(ethersProvider);
 ```
 
 ### Ethers v5
 ```typescript
-import { createResolver } from "@halaprix/multistep-multicall/engines/ethers-v5";
+import { createResolver } from "@halaprix/domino/ethers-v5";
 const resolver = createResolver(ethersProvider);
 ```
 

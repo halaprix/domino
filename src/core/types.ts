@@ -1,5 +1,5 @@
 /**
- * Core types for the multistep-multicall library.
+ * Core types for the domino library.
  *
  * MultistepTask is the framework-agnostic task description used by runMultistepTasks.
  * Execution is delegated to the StepExecutor passed to runMultistepTasks — the viem,

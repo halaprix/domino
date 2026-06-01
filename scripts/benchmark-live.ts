@@ -364,7 +364,7 @@ async function main(): Promise<void> {
     process.exit(1)
   }
 
-  console.log('\n━━━  multistep-multicall live benchmark  ━━━\n')
+  console.log('\n━━━  domino live benchmark  ━━━\n')
   console.log(`  Tokens:       ${TOKENS_50.length} (${TOKENS_50.length * 2} calls per step)`)
   console.log(`  RPC:          ${rpcUrl.replace(/\/[a-zA-Z0-9_-]{20,}/, '/***')}`)
   if (publicRpcUrl) {

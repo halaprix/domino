@@ -1,10 +1,10 @@
-# Contributing to multistep-multicall
+# Contributing to domino
 
 Thank you for your interest in contributing! This guide covers everything you need to set up, develop, test, and ship changes.
 
 ## Project Overview
 
-`multistep-multicall` is a TypeScript library that wraps Multicall3 with a finite state machine executor for **sequential, state-dependent contract reads**. The core insight: when step N+1 depends on step N results, standard multicall batches fall short. This library reduces N×M RPC calls to M multicalls.
+`domino` is a TypeScript library that wraps Multicall3 with a finite state machine executor for **sequential, state-dependent contract reads**. The core insight: when step N+1 depends on step N results, standard multicall batches fall short. This library reduces N×M RPC calls to M multicalls.
 
 **Key exports:**
 - `runMultistepTasks` — core FSM executor
@@ -47,7 +47,7 @@ src/
 
 ```bash
 git clone <repo-url>
-cd multistep-multicall
+cd domino
 npm install
 ```
 
@@ -191,7 +191,7 @@ The `prepublishOnly` script runs `npm run build && npm test` — you can't accid
 ## Reporting Issues
 
 Bug reports welcome! Please include:
-- Library version (`npm list @halaprix/multistep-multicall`)
+- Library version (`npm list @halaprix/domino`)
 - Node / npm versions
 - Minimal reproduction case (code or repo link)
 - Expected vs actual behavior

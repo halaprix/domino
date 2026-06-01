@@ -6,8 +6,8 @@
  * MulticallResolver consumes one and exposes the typed resolve methods.
  *
  * Usage (new preferred pattern):
- *   import { createViemExecutor } from '@halaprix/multistep-multicall/engines/viem'
- *   import { MulticallResolver } from '@halaprix/multistep-multicall'
+ *   import { createViemExecutor } from '@halaprix/domino/viem'
+ *   import { MulticallResolver } from '@halaprix/domino'
  *
  *   const executor = createViemExecutor(client)
  *   const resolver = new MulticallResolver(executor)

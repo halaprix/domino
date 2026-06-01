@@ -3,7 +3,7 @@
 <html class="dark" lang="en"><head>
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-<title>multistep-multicall - Batched on-chain reads</title>
+<title>domino — sequential on-chain reads</title>
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
 <script src="https://cdn.jsdelivr.net/npm/ethers@6.9.0/dist/ethers.umd.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600;700&family=JetBrains+Mono:wght@400;600&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
@@ -122,7 +122,7 @@
 <body class="bg-background text-on-background font-body-md antialiased overflow-x-hidden min-h-screen flex flex-col">
 <!-- TopNavBar -->
 <nav class="fixed top-0 w-full z-50 flex justify-between items-center px-gutter max-w-container-max mx-auto h-16 bg-background border-b border-outline-variant transition-all duration-200 ease-in-out">
-<div class="font-headline-md text-headline-md font-bold text-on-background tracking-tight">multistep-multicall</div>
+<div class="font-headline-md text-headline-md font-bold text-on-background tracking-tight">domino</div>
 <div class="hidden md:flex gap-md items-center">
 <a class="text-on-surface-variant hover:text-primary transition-colors font-body-md text-body-md" href="#">Docs</a>
 <a class="text-on-surface-variant hover:text-primary transition-colors font-body-md text-body-md" href="#">Examples</a>
@@ -142,7 +142,7 @@
 <span class="text-transparent bg-clip-text bg-gradient-to-r from-primary to-inverse-primary">Without the compromise.</span>
 </h1>
 <p class="font-body-lg text-body-lg text-on-surface-variant mb-lg max-w-2xl mx-auto">
-                multistep-multicall solves the N×M RPC problem. Sequential, state-dependent contract reads — resolved in M multicalls, not N×M individual calls.
+                domino solves the N×M RPC problem. Sequential, self-triggering on-chain reads — resolved in M multicalls, not N×M individual calls.
             </p>
 <div class="flex flex-col sm:flex-row gap-sm justify-center items-center">
 <a class="px-6 py-3 bg-inverse-primary text-white rounded-md font-body-md text-body-md font-semibold glow-hover transition-all" href="#">Get started</a>
@@ -544,7 +544,7 @@ render();
 <h2 class="font-headline-md text-headline-md text-white mb-sm">Quick Start</h2>
 <div class="code-container rounded-lg p-sm relative group">
 <button class="absolute top-sm right-sm text-on-surface-variant hover:text-primary transition-colors opacity-0 group-hover:opacity-100 bg-surface-container p-1 rounded border border-outline-variant"><span class="material-symbols-outlined text-[16px]">content_copy</span></button>
-<pre class="font-code-block text-code-block overflow-x-auto text-on-surface-variant"><span class="text-inverse-primary">import</span> { createResolver } <span class="text-inverse-primary">from</span> <span class="text-primary">"@halaprix/multistep-multicall/engines/viem"</span>;
+<pre class="font-code-block text-code-block overflow-x-auto text-on-surface-variant"><span class="text-inverse-primary">import</span> { createResolver } <span class="text-inverse-primary">from</span> <span class="text-primary">"@halaprix/domino/viem"</span>;
 
 <span class="text-primary">const</span> resolver = createResolver(client);
 <span class="text-primary">const</span> vault = <span class="text-inverse-primary">await</span> resolver.resolveErc4626({ 

@@ -1,6 +1,6 @@
 # API Reference
 
-Complete reference for `@halaprix/multistep-multicall`. For a quick introduction see the [README](../README.md); for bundle size data and comparisons see [Benchmarks](benchmarks.md).
+Complete reference for `@halaprix/domino`. For a quick introduction see the [README](../README.md); for bundle size data and comparisons see [Benchmarks](benchmarks.md).
 
 ## Architecture
 
@@ -60,8 +60,8 @@ The FSM runs through all tasks step-by-step:
 Pick one at import time. The other two engines are eliminated by tree-shaking.
 
 ```typescript
-import { createResolver } from "@halaprix/multistep-multicall/engines/viem";
-// or "multistep-multicall/engines/ethers-v6"
+import { createResolver } from "@halaprix/domino/viem";
+// or "domino/ethers-v6"
 ```
 
 Returns a `ResolverEngine` with a uniform API regardless of which library you chose. The `ResolverEngine` is designed as a convenience facade that provides the most common DeFi tokens (ERC20/ERC4626) built in, while also providing a generic extension point for executing custom tasks.
@@ -104,8 +104,8 @@ const [price] = await resolver.run([myTask]);
 The handlers run against any `StepExecutor` — the same one-method interface the engines implement. Use this when you want a custom backend (a test double, a batching proxy, a non-standard multicall). The `client` field is a `StepExecutor`, **not** a viem `PublicClient` — for viem/ethers, use the engine entry points (Layer 1), which build the executor for you.
 
 ```typescript
-import { resolveErc4626Vault } from "@halaprix/multistep-multicall";
-import type { StepExecutor } from "@halaprix/multistep-multicall";
+import { resolveErc4626Vault } from "@halaprix/domino";
+import type { StepExecutor } from "@halaprix/domino";
 
 const executor: StepExecutor = {
   async executeMulticall(calls) {

@@ -23,6 +23,6 @@ export { buildErc4626Task, resolveErc4626Vault, resolveErc4626VaultsBulk } from 
 export type { Erc4626VaultResolution } from './handlers/erc4626'
 
 // Engines export executors + createResolver convenience from their subpaths:
-//   import { createViemExecutor, createResolver } from '@halaprix/multistep-multicall/engines/viem'
-//   import { createEthersV6Executor, createResolver } from '@halaprix/multistep-multicall/engines/ethers-v6'
-//   import { createEthersV5Executor, createResolver } from '@halaprix/multistep-multicall/engines/ethers-v5'
+//   import { createViemExecutor, createResolver } from '@halaprix/domino/viem'
+//   import { createEthersV6Executor, createResolver } from '@halaprix/domino/ethers-v6'
+//   import { createEthersV5Executor, createResolver } from '@halaprix/domino/ethers-v5'

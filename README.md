@@ -1,19 +1,19 @@
-# multistep-multicall
+# domino
 
 [![CI](https://github.com/halaprix/multistep-multicall/actions/workflows/ci.yml/badge.svg)](https://github.com/halaprix/multistep-multicall/actions/workflows/ci.yml)
-[![npm version](https://img.shields.io/npm/v/@halaprix/multistep-multicall)](https://www.npmjs.com/package/@halaprix/multistep-multicall)
-[![bundle size](https://img.shields.io/badge/gzip-1.8%E2%80%932.4KB-brightgreen)](https://www.npmjs.com/package/@halaprix/multistep-multicall)
+[![npm version](https://img.shields.io/npm/v/@halaprix/domino)](https://www.npmjs.com/package/@halaprix/domino)
+[![bundle size](https://img.shields.io/badge/gzip-1.8%E2%80%932.4KB-brightgreen)](https://www.npmjs.com/package/@halaprix/domino)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5-blue)](https://www.typescriptlang.org/)
 [![MIT License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**Batched on-chain data resolution for sequential, state-dependent reads.**
+**Sequential, self-triggering on-chain reads.**
 
 ## Quick Start
 
-Standard multicall batches calls that are **known upfront**. But what about when Step 2 depends on Step 1? You either make N×M sequential RPC calls, or you make fewer calls than you could. `multistep-multicall` solves this with an FSM executor: each step's calls are batched, and results flow into the next step automatically.
+Standard multicall batches calls that are **known upfront**. But what about when Step 2 depends on Step 1? You either make N×M sequential RPC calls, or you make fewer calls than you could. `domino` solves this with an FSM executor: each step's calls are batched, and results flow into the next step automatically.
 
 ```bash
-npm install @halaprix/multistep-multicall
+npm install @halaprix/domino
 ```
 
 ## Features
@@ -31,7 +31,7 @@ Pick your preferred engine. The library is framework-agnostic, and unused engine
 For the v5 engine, explicitly install ethers v5 in addition to the main package:
 
 ```bash
-npm install @halaprix/multistep-multicall
+npm install @halaprix/domino
 npm install ethers@^5  # v5 engine only
 ```
 
@@ -41,7 +41,7 @@ npm install ethers@^5  # v5 engine only
 
 ```typescript
 import { createPublicClient, http, mainnet } from "viem";
-import { createResolver } from "@halaprix/multistep-multicall/engines/viem";
+import { createResolver } from "@halaprix/domino/viem";
 
 const client = createPublicClient({ chain: mainnet, transport: http() });
 const resolver = createResolver(client);
@@ -64,7 +64,7 @@ const vaults = await resolver.resolveErc4626Bulk({
 
 ```typescript
 import { BrowserProvider } from "ethers";
-import { createResolver } from "@halaprix/multistep-multicall/engines/ethers-v6";
+import { createResolver } from "@halaprix/domino/ethers-v6";
 
 const provider = new BrowserProvider(window.ethereum);
 const resolver = createResolver(provider);
@@ -78,7 +78,7 @@ const token = await resolver.resolveErc20({ token: "0xA0b86991c6218b36c1d19D4a2e
 
 ```typescript
 import { providers } from "ethers";
-import { createResolver } from "@halaprix/multistep-multicall/engines/ethers-v5";
+import { createResolver } from "@halaprix/domino/ethers-v5";
 
 const provider = new providers.Web3Provider(window.ethereum);
 const resolver = createResolver(provider);
