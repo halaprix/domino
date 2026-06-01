@@ -156,7 +156,7 @@ describe('ethers v5 engine', () => {
     expect(results[0]!.decimals).toBe(6)
     expect(results[1]!.symbol).toBe('DAI')
     expect(results[1]!.decimals).toBe(18)
-    expect(mockContract.aggregate3).toHaveBeenCalledTimes(1)
+    expect(mockContract['aggregate3']).toHaveBeenCalledTimes(1)
   })
 
   it('handles failed calls gracefully', async () => {

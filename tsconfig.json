@@ -10,6 +10,7 @@
     "exactOptionalPropertyTypes": true,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
+    "noPropertyAccessFromIndexSignature": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "declaration": true,
