@@ -2,7 +2,11 @@
   "name": "@halaprix/multistep-multicall",
   "version": "0.1.0",
   "private": false,
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "type": "module",
   "sideEffects": false,
   "description": "Batched on-chain data resolution for sequential, state-dependent reads. FSM executor for Multicall3 — reduces N×M RPC calls to M multicalls.",
@@ -88,6 +92,7 @@
     }
   },
   "devDependencies": {
+    "@types/node": "^25.9.1",
     "@vitest/coverage-v8": "^2.0.0",
     "eslint": "^9.0.0",
     "eslint-plugin-import": "^2.32.0",

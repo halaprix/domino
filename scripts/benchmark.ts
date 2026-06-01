@@ -27,7 +27,7 @@
 import { runMultistepTasks } from '../src/core/runMultistepTasks'
 import { buildErc20Task } from '../src/handlers/erc20'
 import { buildErc4626Task } from '../src/handlers/erc4626'
-import type { StepExecutor, Address } from '../src/core/types'
+import type { StepExecutor, Address, MultistepTask } from '../src/core/types'
 
 // ---------------------------------------------------------------------------
 // Mock executor that records call count and simulates latency
@@ -131,7 +131,7 @@ async function runMultistep(
     ...tokens.map((token) => buildErc20Task({ token })),
     ...vaults.map((vault) => buildErc4626Task({ vault })),
   ]
-  await runMultistepTasks(executor, tasks)
+  await runMultistepTasks(executor, tasks as MultistepTask<unknown>[])
 }
 
 // ---------------------------------------------------------------------------
