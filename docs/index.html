@@ -177,14 +177,14 @@
 <span class="font-label-caps text-label-caps text-error flex items-center gap-2"><span class="material-symbols-outlined text-[16px]">close</span> The problem</span>
 </div>
 <pre class="pt-10 font-code-block text-code-block overflow-x-auto text-on-surface-variant"><span class="text-inverse-primary">for</span> (<span class="text-primary">const</span> vault <span class="text-inverse-primary">of</span> vaults) {
-  <span class="text-outline">// Call 1</span>
+  <span class="text-outline">// Call 1: get user's vault shares</span>
+  <span class="text-primary">const</span> shares = <span class="text-inverse-primary">await</span> vault.balanceOf(user);
+  
+  <span class="text-outline">// Call 2: convert to assets (depends on Call 1 output)</span>
+  <span class="text-primary">const</span> assets = <span class="text-inverse-primary">await</span> vault.convertToAssets(shares);
+  
+  <span class="text-outline">// Call 3: get underlying asset</span>
   <span class="text-primary">const</span> token = <span class="text-inverse-primary">await</span> vault.asset();
-  
-  <span class="text-outline">// Call 2 (depends on Call 1)</span>
-  <span class="text-primary">const</span> decimals = <span class="text-inverse-primary">await</span> erc20.decimals(token);
-  
-  <span class="text-outline">// Call 3</span>
-  <span class="text-primary">const</span> balance = <span class="text-inverse-primary">await</span> vault.balanceOf(user);
 }</pre>
 </div>
 <!-- The Solution -->
