@@ -2,11 +2,41 @@
  * Core types for the domino library.
  *
  * MultistepTask is the framework-agnostic task description used by runMultistepTasks.
- * Execution is delegated to the StepExecutor passed to runMultistepTasks — the viem,
- * ethers v5/v6 engines, or any custom backend.
+ * Execution is delegated to the StepExecutor passed to runMultistepTasks — the
+ * Eip1193Executor or any custom backend.
  */
 
 import type { Abi } from 'abitype'
+
+/** Block tag strings supported by eth_call. */
+export type BlockTag = 'latest' | 'earliest' | 'pending' | 'safe' | 'finalized'
+
+/**
+ * Block identifier for historical queries.
+ * Implements EIP-1898: exactly one of blockNumber, blockTag, or blockHash.
+ */
+export type BlockParam =
+  | { blockNumber: bigint }
+  | { blockTag: BlockTag }
+  | { blockHash: `0x${string}`; requireCanonical?: boolean }
+
+/** Default block: 'latest' */
+export const DEFAULT_BLOCK: BlockParam = { blockTag: 'latest' }
+
+/**
+ * Minimal EIP-1193 provider interface.
+ * Works with viem PublicClient, ethers providers, window.ethereum.
+ *
+ * Event methods are optional — not all providers support them
+ * (e.g., viem PublicClient delegates events to the transport layer).
+ * For chain-change detection, prefer passing chainId explicitly
+ * to the executor constructor.
+ */
+export interface Eip1193Provider {
+  request(args: { method: string; params?: readonly unknown[] }): Promise<unknown>
+  on?(event: string, handler: (...args: unknown[]) => void): void
+  removeListener?(event: string, handler: (...args: unknown[]) => void): void
+}
 
 /**
  * A single on-chain call that belongs to one step of one task.
@@ -42,7 +72,12 @@ export type StepResult =
  * Allows pluggable backends: viem, ethers v5, ethers v6, etc.
  */
 export interface StepExecutor {
-  executeMulticall(calls: StepCall[]): Promise<RawResult[]>
+  /**
+   * Execute one batch of calls.
+   * @param calls — calls to batch
+   * @param block — optional block identifier (defaults to 'latest')
+   */
+  executeMulticall(calls: StepCall[], block?: BlockParam): Promise<RawResult[]>
 }
 
 /**
