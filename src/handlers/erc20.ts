@@ -8,7 +8,7 @@
  *   Step 1: symbol(), decimals(), balanceOf(owner?)
  */
 
-import type { Address, MultistepTask, StepCall, StepResult, StepExecutor } from '../core/types'
+import type { Address, MultistepTask, StepCall, StepResult, StepExecutor, BlockParam } from '../core/types'
 import { runMultistepTasks } from '../core/runMultistepTasks'
 import { erc20Abi } from '../abis/erc'
 
@@ -113,11 +113,14 @@ export async function resolveErc20Token(params: {
   client: StepExecutor
   token: Address
   owner?: Address
+  block?: BlockParam
 }): Promise<Erc20TokenResolution> {
   const executor = params.client
   const taskParams: { token: Address; owner?: Address } = { token: params.token }
   if (params.owner !== undefined) taskParams.owner = params.owner
-  const [result] = await runMultistepTasks(executor, [buildErc20Task(taskParams)])
+  const [result] = await runMultistepTasks(executor, [buildErc20Task(taskParams)], {
+    block: params.block,
+  })
   return result!
 }
 
@@ -125,6 +128,7 @@ export async function resolveErc20TokensBulk(params: {
   client: StepExecutor
   entries: { token: Address; owner?: Address }[]
   batchSize?: number
+  block?: BlockParam
 }): Promise<Erc20TokenResolution[]> {
   if (params.entries.length === 0) return []
   const executor = params.client
@@ -136,6 +140,6 @@ export async function resolveErc20TokensBulk(params: {
   return runMultistepTasks(
     executor,
     tasks,
-    params.batchSize !== undefined ? { batchSize: params.batchSize } : undefined,
+    { batchSize: params.batchSize, block: params.block },
   )
 }
