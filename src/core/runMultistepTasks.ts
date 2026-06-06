@@ -13,7 +13,7 @@
  * (vs O(N) sequential calls for naive approach)
  */
 
-import type { MultistepTask, StepCall, StepResult, StepExecutor, RawResult } from './types'
+import type { MultistepTask, StepCall, StepResult, StepExecutor, RawResult, BlockParam } from './types'
 
 /**
  * Options for runMultistepTasks.
@@ -27,6 +27,9 @@ export interface BatchOptions {
    * Default: 100. Must be a positive integer — anything else throws.
    */
   batchSize?: number
+
+  /** Block to query at (defaults to 'latest'). Same block used for ALL steps. */
+  block?: BlockParam
 }
 
 /**
@@ -95,7 +98,7 @@ export async function runMultistepTasks<TResult>(
       // Each batch executes as a separate multicall round-trip.
       for (let batchStart = 0; batchStart < calls.length; batchStart += batchSize) {
         const batch = calls.slice(batchStart, batchStart + batchSize)
-        const results = await executor.executeMulticall(batch)
+        const results = await executor.executeMulticall(batch, options?.block)
 
         // Dev-time guard: a misbehaving executor that returns fewer results than
         // calls would silently corrupt routing — fail loudly instead.
