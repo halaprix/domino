@@ -3,7 +3,7 @@
 All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [2.0.0] — 2026-06-06
+## [1.0.0] — 2026-06-06
 
 ### Added
 - **Block tags**: query historical state at any `blockNumber`, `blockTag`, or `blockHash` (EIP-1898).
@@ -14,7 +14,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `BlockParam`, `BlockTag`, `Eip1193Provider` types exported.
 - `MULTICALL3_BYTECODE`, `DEPLOYLESS_WRAPPER_BYTECODE`, `MULTICALL3_DEPLOYMENTS` exported for advanced use.
 - `shouldUseDeployless()` helper exported.
-- `MIGRATION.md` with v1 → v2 migration guide.
+- `MIGRATION.md` with v0.1.0 → v1.0.0 migration guide.
 
 ### Changed
 - `StepExecutor.executeMulticall()` now accepts optional `block` parameter.
@@ -33,11 +33,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Multi-output function results now properly unwrapped (single-element arrays → scalar value).
 - chainId detection uses promise-based lock to prevent concurrent `eth_chainId` calls.
 - `refreshChainId()` method for wallet chain switches.
-
-## [0.1.0] — 2026-05-31
-_Initial release._
-
-## [Unreleased]
 
 ## [0.1.0] — 2026-06-01
 
@@ -79,5 +74,5 @@ First public release of `@halaprix/domino`.
 - `position.assets` is `bigint | undefined` — correctly represents the case where `balanceOf` succeeds but `convertToAssets` reverts.
 - CI now runs real `tsc --noEmit` (typecheck); build step runs before tests so `dist/` exists for bundle-size checks on a clean checkout.
 
-[Unreleased]: https://github.com/halaprix/domino/compare/v0.1.0...HEAD
+[1.0.0]: https://github.com/halaprix/domino/releases/tag/v1.0.0
 [0.1.0]: https://github.com/halaprix/domino/releases/tag/v0.1.0

@@ -2,9 +2,9 @@
 
 ## Project Overview
 
-`domino` is a TypeScript library that wraps Multicall3 with an FSM executor for **sequential, state-dependent contract reads**. v2 uses a single `Eip1193Executor` — works with any EIP-1193 provider (viem, ethers, window.ethereum). Supports historical block queries and deployless multicall for chains/blocks where Multicall3 wasn't deployed.
+`domino` is a TypeScript library that wraps Multicall3 with an FSM executor for **sequential, state-dependent contract reads**. Uses a single `Eip1193Executor` — works with any EIP-1193 provider (viem, ethers, window.ethereum). Supports historical block queries and deployless multicall for chains/blocks where Multicall3 wasn't deployed.
 
-## Architecture (v2)
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -30,7 +30,7 @@
           └─────────────────────────┘
 ```
 
-## Directory Structure (v2)
+## Directory Structure
 
 ```
 src/
@@ -50,7 +50,7 @@ src/
 └── index.ts           # Public API surface
 ```
 
-## Usage (v2)
+## Usage
 
 ```typescript
 import { createPublicClient, http, mainnet } from "viem"
@@ -105,7 +105,7 @@ npm run build     # tsup — single ESM/CJS entry
 ## Key Constraints
 
 - **Never use `client.multicall` directly in handler code** — always go through `runMultistepTasks` + `StepExecutor`.
-- **Eip1193Executor** is the sole engine. No per-library engines (viem/ethers-v5/ethers-v6 removed in v2).
+- **Eip1193Executor** is the sole engine. No per-library engines (viem/ethers-v5/ethers-v6 removed).
 - ABIs are **inlined in handler files** as `const` arrays (no separate `abis/` directory).
 - When adding a new token standard, add a `src/handlers/<name>.ts` exporting both a `build<Name>Task()` factory and `resolve<Name>()` convenience functions.
 - **Deployless fallback**: when Multicall3 wasn't deployed at the target block, the executor automatically uses CREATE-style `eth_call` with the vendored wrapper bytecode.
