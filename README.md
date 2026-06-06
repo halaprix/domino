@@ -21,96 +21,127 @@ _|    _|  _|    _|  _|    _|    _|  _|  _|    _|  _|    _|
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5-blue)](https://www.typescriptlang.org/)
 [![MIT License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**Sequential, self-triggering on-chain reads.**
-
-## Quick Start
-
-Standard multicall batches calls that are **known upfront**. But what about when Step 2 depends on Step 1? You either make N×M sequential RPC calls, or you make fewer calls than you could. `domino` solves this with an FSM executor: each step's calls are batched, and results flow into the next step automatically.
+**A state machine for on-chain reads.** Define steps, push results through. One multicall per step.
 
 ```bash
 npm install @halaprix/domino
 ```
 
-## Features
+## But wait — it's just a state machine
 
-- **Sequential steps**: FSM executor automatically resolves state-dependent contract reads.
-- **2-step vault resolution**: Built-in support for ERC4626 metadata and `convertToAssets`.
-- **Bulk operations**: Resolve N vaults or tokens in O(steps) RPC calls instead of O(N).
-- **Framework-agnostic core**: Works with viem, ethers v5, and ethers v6.
-- **Tiny footprint**: ~2.1KB gzip wrapper, tree-shakeable engines (only your chosen library is bundled).
+Multicall is great for batched reads. But what about when step 2 needs step 1's results?
 
-## Installation
-
-Pick your preferred engine. The library is framework-agnostic, and unused engines are tree-shaken out.
-
-For the v5 engine, explicitly install ethers v5 in addition to the main package:
-
-```bash
-npm install @halaprix/domino
-npm install ethers@^5  # v5 engine only
-```
-
-## Usage
-
-### viem (Recommended)
+Instead of N separate RPC calls per step, domino runs your state machine **as a batch** — one `multicall` per step. You define the steps, it wires them together.
 
 ```typescript
-import { createPublicClient, http, mainnet } from "viem";
-import { createResolver } from "@halaprix/domino/viem";
+import { createPublicClient, http, mainnet } from "viem"
+import { MulticallResolver, Eip1193Executor } from "@halaprix/domino"
 
-const client = createPublicClient({ chain: mainnet, transport: http() });
-const resolver = createResolver(client);
+const provider = createPublicClient({ chain: mainnet, transport: http() })
+const resolver = new MulticallResolver(new Eip1193Executor(provider))
 
-// ERC20 token with owner balance
-const token = await resolver.resolveErc20({
-  token: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-  owner: "0xd8dA6BF26764cbF84d5537Bd0c02F5f6bCF9A1d9",
-});
-// { symbol: "USDC", decimals: 6, balance: 12345678n }
+// 🧠 Any state machine — define steps, domino batches them:
+const result = await resolver.run({
+  taskName: "price-check",
 
-// Bulk ERC4626 vault resolution (2-step: metadata + convertToAssets)
-const vaults = await resolver.resolveErc4626Bulk({
-  entries: vaultAddresses.map((addr) => ({ vault: addr, owner: "0xd8d..." })),
-});
-// Resolves all M vaults in exactly 2 multicall rounds
+  // Step 1: batch of independent reads
+  *steps() {
+    yield {
+      calls: [
+        { key: "price", abi: oracleAbi, functionName: "latestAnswer" },
+        { key: "decimals", abi: erc20Abi, functionName: "decimals" },
+      ],
+    }
+
+    // Step 2: uses results from step 1
+    const price = this.getResult("price").value
+    const decimals = this.getResult("decimals").value
+    const scaledPrice = price * (10n ** (18n - decimals))
+
+    yield {
+      calls: [], // optional — if you need more steps
+    }
+  },
+
+  // finalize: assemble the answer
+  finalize() {
+    const price = this.getResult("price").value
+    const decimals = this.getResult("decimals").value
+    return { price, decimals, scaledPrice: price * (10n ** (18n - decimals)) }
+  },
+})
 ```
 
-### ethers v6
+That's the whole API. Two pages — read the source of [`erc4626.ts`](src/handlers/erc4626.ts) if you want to see a complete example.
+
+## Built-in task builders
+
+For convenience, domino ships with pre-built task builders:
 
 ```typescript
-import { BrowserProvider } from "ethers";
-import { createResolver } from "@halaprix/domino/ethers-v6";
+import { buildErc4626Task, resolveErc4626Vault } from "@halaprix/domino"
 
-const provider = new BrowserProvider(window.ethereum);
-const resolver = createResolver(provider);
+// One vault — 2 multicalls (metadata + convertToAssets)
+const vault = await resolveErc4626Vault({
+  client: executor,
+  vault: "0x...",
+  owner: "0x...",
+})
+// { name, symbol, decimals, balance, assets, ... }
 
-const token = await resolver.resolveErc20({ token: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" });
+// 100 vaults — still just 2 multicalls
+const vaults = await resolveErc4626VaultsBulk({
+  client: executor,
+  entries: vaultAddresses.map(a => ({ vault: a, owner })),
+})
 ```
 
-### ethers v5
+Same pattern for ERC20, and you can `buildErc4626Task()` / `buildErc20Task()` to compose them into custom pipelines.
 
-> **Requires ethers v5:** `npm install ethers@^5`
+## Historical blocks
+
+Query any block with EIP-1898:
 
 ```typescript
-import { providers } from "ethers";
-import { createResolver } from "@halaprix/domino/ethers-v5";
-
-const provider = new providers.Web3Provider(window.ethereum);
-const resolver = createResolver(provider);
-
-const vault = await resolver.resolveErc4626({ vault: "0x...", owner: "0x..." });
+const oldVault = await resolveErc4626Vault({
+  client: executor,
+  vault: "0x...",
+  block: { blockNumber: 19_000_000n },
+})
 ```
+
+Works with `blockHash`, `blockTag`, or `blockNumber`. Even on chains where Multicall3 didn't exist yet — domino falls back to deployless multicall automatically.
+
+## When NOT to use it
+
+- Pure batches (no dependencies) → plain `multicall` is simpler.
+- Write transactions → wrong tool. This reads only.
+- Single reads → just use `client.readContract()` directly.
+
+## API at a glance
+
+| Export | What it is |
+|--------|-----------|
+| `MulticallResolver` | Convenience layer — call `run()` to execute a state machine |
+| `Eip1193Executor` | Single engine — works with any EIP-1193 provider |
+| `runMultistepTasks()` | Core FSM — bare-metal version of the resolver |
+| `buildErc20Task()` | Build a task definition for ERC20 token reads |
+| `buildErc4626Task()` | Build a task definition for ERC4626 vault reads |
+| `resolveErc20Token()` | One-shot ERC20: `{ symbol, decimals, balance }` |
+| `resolveErc4626Vault()` | One-shot ERC4626: `{ name, assets, ... }` |
+| `BlockParam` | `{ blockNumber?, blockTag?, blockHash? }` |
 
 ## Documentation
 
-- [API Reference](docs/api-reference.md)
-- [Benchmarks & Comparisons](docs/benchmarks.md)
 - [Architecture & AI Context](CLAUDE.md)
-- [Historical Specification](docs/SPEC.md)
+- [API Reference](docs/api-reference.md)
+- [Benchmarks](docs/benchmarks.md)
+- [Migration Guide](MIGRATION.md)
+- [Changelog](CHANGELOG.md)
 
 ## Contributing
 
-See our [Contributing Guide](CONTRIBUTING.md) for details on how to set up the repository, run tests, and submit pull requests.
+See our [Contributing Guide](CONTRIBUTING.md).
 
 ## License
 
