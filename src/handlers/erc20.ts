@@ -10,7 +10,31 @@
 
 import type { Address, MultistepTask, StepCall, StepResult, StepExecutor, BlockParam } from '../core/types'
 import { runMultistepTasks } from '../core/runMultistepTasks'
-import { erc20Abi } from '../abis/erc'
+
+/** Minimal ERC20 ABI — only the functions used by buildErc20Task. */
+const erc20Abi = [
+  {
+    type: 'function',
+    name: 'symbol',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'string' }],
+  },
+  {
+    type: 'function',
+    name: 'decimals',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'uint8' }],
+  },
+  {
+    type: 'function',
+    name: 'balanceOf',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ type: 'uint256' }],
+  },
+] as const
 
 // ─── Value types ──────────────────────────────────────────────────────────────
 
@@ -119,7 +143,7 @@ export async function resolveErc20Token(params: {
   const taskParams: { token: Address; owner?: Address } = { token: params.token }
   if (params.owner !== undefined) taskParams.owner = params.owner
   const [result] = await runMultistepTasks(executor, [buildErc20Task(taskParams)], {
-    block: params.block,
+    ...(params.block !== undefined ? { block: params.block } : {}),
   })
   return result!
 }
@@ -140,6 +164,9 @@ export async function resolveErc20TokensBulk(params: {
   return runMultistepTasks(
     executor,
     tasks,
-    { batchSize: params.batchSize, block: params.block },
+    {
+      ...(params.batchSize !== undefined ? { batchSize: params.batchSize } : {}),
+      ...(params.block !== undefined ? { block: params.block } : {}),
+    },
   )
 }

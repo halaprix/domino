@@ -11,7 +11,63 @@
 
 import type { Address, MultistepTask, StepCall, StepResult, StepExecutor, BlockParam } from '../core/types'
 import { runMultistepTasks } from '../core/runMultistepTasks'
-import { erc20Abi, erc4626Abi } from '../abis/erc'
+
+/** Minimal ERC20 ABI — only the functions used by buildErc4626Task. */
+const erc20Abi = [
+  {
+    type: 'function',
+    name: 'symbol',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'string' }],
+  },
+  {
+    type: 'function',
+    name: 'decimals',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'uint8' }],
+  },
+  {
+    type: 'function',
+    name: 'balanceOf',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ type: 'uint256' }],
+  },
+] as const
+
+/** Minimal ERC4626 ABI — only the functions used by buildErc4626Task. */
+const erc4626Abi = [
+  {
+    type: 'function',
+    name: 'asset',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'address' }],
+  },
+  {
+    type: 'function',
+    name: 'maxWithdraw',
+    stateMutability: 'view',
+    inputs: [{ name: 'owner', type: 'address' }],
+    outputs: [{ type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'maxRedeem',
+    stateMutability: 'view',
+    inputs: [{ name: 'owner', type: 'address' }],
+    outputs: [{ type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'convertToAssets',
+    stateMutability: 'view',
+    inputs: [{ name: 'shares', type: 'uint256' }],
+    outputs: [{ type: 'uint256' }],
+  },
+] as const
 
 // ─── Value types ──────────────────────────────────────────────────────────────
 
