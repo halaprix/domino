@@ -9,7 +9,7 @@
  *                    maxRedeem → then convertToAssets(balance))
  */
 
-import type { Address, MultistepTask, StepCall, StepResult, StepExecutor } from '../core/types'
+import type { Address, MultistepTask, StepCall, StepResult, StepExecutor, BlockParam } from '../core/types'
 import { runMultistepTasks } from '../core/runMultistepTasks'
 import { erc20Abi, erc4626Abi } from '../abis/erc'
 
@@ -179,11 +179,14 @@ export async function resolveErc4626Vault(params: {
   client: StepExecutor
   vault: Address
   owner?: Address
+  block?: BlockParam
 }): Promise<Erc4626VaultResolution> {
   const executor = params.client
   const taskParams: { vault: Address; owner?: Address } = { vault: params.vault }
   if (params.owner !== undefined) taskParams.owner = params.owner
-  const [result] = await runMultistepTasks(executor, [buildErc4626Task(taskParams)])
+  const [result] = await runMultistepTasks(executor, [buildErc4626Task(taskParams)], {
+    block: params.block,
+  })
   return result!
 }
 
@@ -191,6 +194,7 @@ export async function resolveErc4626VaultsBulk(params: {
   client: StepExecutor
   entries: { vault: Address; owner?: Address }[]
   batchSize?: number
+  block?: BlockParam
 }): Promise<Erc4626VaultResolution[]> {
   if (params.entries.length === 0) return []
   const executor = params.client
@@ -202,6 +206,6 @@ export async function resolveErc4626VaultsBulk(params: {
   return runMultistepTasks(
     executor,
     tasks,
-    params.batchSize !== undefined ? { batchSize: params.batchSize } : undefined,
+    { batchSize: params.batchSize, block: params.block },
   )
 }
