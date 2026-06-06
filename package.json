@@ -80,14 +80,10 @@
     "prepublishOnly": "npm run build && npm test"
   },
   "peerDependencies": {
-    "ethers": "^5.8.0 || ^6.16.0",
-    "viem": "^2.52.0"
+    "ethers": "^5.8.0 || ^6.16.0"
   },
   "peerDependenciesMeta": {
     "ethers": {
-      "optional": true
-    },
-    "viem": {
       "optional": true
     }
   },
@@ -103,7 +99,6 @@
     "tsx": "^4.20.0",
     "typescript": "^5.5.0",
     "typescript-eslint": "^8.0.0",
-    "viem": "2.52.0",
     "vitest": "^2.0.0"
   },
   "keywords": [
@@ -123,6 +118,7 @@
     "url": "https://github.com/halaprix/domino"
   },
   "dependencies": {
-    "abitype": "^1.2.4"
+    "abitype": "^1.2.4",
+    "viem": "^2.52.0"
   }
 }
