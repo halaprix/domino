@@ -3,6 +3,40 @@
 All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.0.0] — 2026-06-06
+
+### Added
+- **Block tags**: query historical state at any `blockNumber`, `blockTag`, or `blockHash` (EIP-1898).
+- **Deployless multicall**: automatic fallback when Multicall3 wasn't deployed at the target block. Uses viem's `deploylessCallViaBytecodeBytecode` wrapper — a CREATE-style `eth_call` that deploys Multicall3 and calls `aggregate3` in one transaction.
+- **EIP-1193 provider**: works with any provider implementing `request({ method, params })` — viem, ethers, window.ethereum.
+- **Per-chain deployment registry**: 8 major EVM chains, auto-detected from `eth_chainId`.
+- `Eip1193Executor` — single engine replacing viem/ethers-v5/ethers-v6 executors.
+- `BlockParam`, `BlockTag`, `Eip1193Provider` types exported.
+- `MULTICALL3_BYTECODE`, `DEPLOYLESS_WRAPPER_BYTECODE`, `MULTICALL3_DEPLOYMENTS` exported for advanced use.
+- `shouldUseDeployless()` helper exported.
+- `MIGRATION.md` with v1 → v2 migration guide.
+
+### Changed
+- `StepExecutor.executeMulticall()` now accepts optional `block` parameter.
+- `runMultistepTasks` — `BatchOptions` now includes `block?: BlockParam`.
+- `resolveErc20Token`, `resolveErc4626Vault` etc. — optional `block` in params (backward-compatible).
+- `viem` moved from optional peer dependency to hard dependency (tree-shakes to ~3KB for ABI utils).
+
+### Removed
+- **Ethers v5 engine** — use `Eip1193Executor` with an ethers provider instead.
+- **Ethers v6 engine** — same.
+- **Viem engine** (`createViemExecutor`, `createResolver`) — use `new Eip1193Executor(provider)`.
+- Subpath exports: `@halaprix/domino/viem`, `/ethers-v6`, `/ethers-v5`.
+- `src/abis/` directory — ABIs inlined in handlers and engine.
+
+### Fixed
+- Multi-output function results now properly unwrapped (single-element arrays → scalar value).
+- chainId detection uses promise-based lock to prevent concurrent `eth_chainId` calls.
+- `refreshChainId()` method for wallet chain switches.
+
+## [0.1.0] — 2026-05-31
+_Initial release._
+
 ## [Unreleased]
 
 ## [0.1.0] — 2026-06-01
