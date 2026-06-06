@@ -241,7 +241,7 @@ export async function resolveErc4626Vault(params: {
   const taskParams: { vault: Address; owner?: Address } = { vault: params.vault }
   if (params.owner !== undefined) taskParams.owner = params.owner
   const [result] = await runMultistepTasks(executor, [buildErc4626Task(taskParams)], {
-    block: params.block,
+    ...(params.block !== undefined ? { block: params.block } : {}),
   })
   return result!
 }
@@ -262,6 +262,6 @@ export async function resolveErc4626VaultsBulk(params: {
   return runMultistepTasks(
     executor,
     tasks,
-    { batchSize: params.batchSize, block: params.block },
+    { ...(params.batchSize !== undefined ? { batchSize: params.batchSize } : {}), ...(params.block !== undefined ? { block: params.block } : {}) },
   )
 }

@@ -3,12 +3,12 @@ import { parseAbi, encodeFunctionResult, encodeAbiParameters } from 'viem'
 import { Eip1193Executor } from '../../engine/eip1193'
 
 // Helper to encode an aggregate3 response with one successful call
-function encodeAggregate3Result(innerAbi: string, fn: string, innerResult: unknown): string {
+function encodeAggregate3Result(innerAbi: readonly unknown[], fn: string, innerResult: unknown): string {
   const returnData = encodeFunctionResult({
-    abi: parseAbi([innerAbi]),
+    abi: innerAbi,
     functionName: fn,
     result: innerResult,
-  }) as `0x${string}`
+  } as any) as `0x${string}`
 
   const result = encodeAbiParameters(
     [{ type: 'tuple[]', components: [{ name: 'success', type: 'bool' }, { name: 'returnData', type: 'bytes' }] }],
@@ -34,7 +34,7 @@ describe('Eip1193Executor', () => {
   it('sends eth_call to deployed Multicall3 for mainnet at latest', async () => {
     const ONE_MILLION = 1_000_000n
     const mockResult = encodeAggregate3Result(
-      'function totalSupply() view returns (uint256)',
+      totalSupplyAbi as any,
       'totalSupply',
       ONE_MILLION,
     )
@@ -57,7 +57,10 @@ describe('Eip1193Executor', () => {
 
     expect(results).toHaveLength(1)
     expect(results[0]!.status).toBe('success')
-    expect(results[0]!.value).toBe(ONE_MILLION)
+    const successResult = results[0]!
+    if (successResult.status === 'success') {
+      expect(successResult.value).toBe(ONE_MILLION)
+    }
 
     // Verify deployed path: should have 'to' field pointing to Multicall3
     const callArgs = provider.request.mock.calls[1]![0]
@@ -68,7 +71,7 @@ describe('Eip1193Executor', () => {
   it('uses deployless for mainnet before 14,353,601', async () => {
     const ONE_MILLION = 1_000_000n
     const mockResult = encodeAggregate3Result(
-      'function totalSupply() view returns (uint256)',
+      totalSupplyAbi as any,
       'totalSupply',
       ONE_MILLION,
     )
@@ -137,7 +140,7 @@ describe('Eip1193Executor', () => {
   it('falls back to deployless on contract-not-found error', async () => {
     const ONE_MILLION = 1_000_000n
     const mockResult = encodeAggregate3Result(
-      'function totalSupply() view returns (uint256)',
+      totalSupplyAbi as any,
       'totalSupply',
       ONE_MILLION,
     )
@@ -169,7 +172,7 @@ describe('Eip1193Executor', () => {
 
   it('caches chainId after first detection', async () => {
     const mockResult = encodeAggregate3Result(
-      'function totalSupply() view returns (uint256)',
+      totalSupplyAbi as any,
       'totalSupply',
       1000n,
     )
