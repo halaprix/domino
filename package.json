@@ -49,14 +49,8 @@
     "benchmark:live": "tsx scripts/benchmark-live.ts",
     "prepublishOnly": "npm run build && npm test"
   },
-  "peerDependencies": {
-    "ethers": "^5.8.0 || ^6.16.0"
-  },
-  "peerDependenciesMeta": {
-    "ethers": {
-      "optional": true
-    }
-  },
+  "peerDependencies": {},
+  "peerDependenciesMeta": {},
   "devDependencies": {
     "@types/node": "^25.9.1",
     "@vitest/coverage-v8": "^2.0.0",

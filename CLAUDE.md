@@ -2,145 +2,112 @@
 
 ## Project Overview
 
-`domino` is a TypeScript library that wraps Multicall3 with an FSM executor for **sequential, state-dependent contract reads**. The core insight: standard multicall libraries only batch calls known upfront. This library solves the "step N+1 depends on step N results" pattern — reducing N×M RPC calls to M multicalls.
+`domino` is a TypeScript library that wraps Multicall3 with an FSM executor for **sequential, state-dependent contract reads**. v2 uses a single `Eip1193Executor` — works with any EIP-1193 provider (viem, ethers, window.ethereum). Supports historical block queries and deployless multicall for chains/blocks where Multicall3 wasn't deployed.
 
-## Architecture
+## Architecture (v2)
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                  ResolverEngine                     │
-│   (viem / ethers-v6 / ethers-v5 adapter)            │
+│                  Eip1193Executor                     │
+│  • Single engine — any EIP-1193 provider             │
+│  • Deployed Multicall3 when available                │
+│  • Deployless (CREATE wrapper) as fallback           │
 └──────────────────────┬──────────────────────────────┘
-                       │ StepExecutor.executeMulticall()
+                       │ executeMulticall(calls, block?)
 ┌──────────────────────▼──────────────────────────────┐
 │            runMultistepTasks() [FSM]                 │
 │  • Finds maxStep across all tasks                   │
 │  • For each step 1..maxStep:                        │
 │    a. buildStepCalls() — collect calls from tasks   │
-│    b. executeMulticall() — one RPC per step        │
+│    b. executeMulticall() — one RPC per step         │
 │    c. consumeStepResults() — distribute to tasks    │
 │  • finalize() — assemble results                    │
 └──────────────────────┬──────────────────────────────┘
-                       │ StepCall[]
-┌──────────────────────▼──────────────────────────────┐
-│                  Multicall3                         │
-│              (on-chain aggregator)                   │
-└─────────────────────────────────────────────────────┘
+                       │
+          ┌────────────▼────────────┐
+          │  Multicall3 (deployed)  │
+          │  or deployless (CREATE) │
+          └─────────────────────────┘
 ```
 
-## Directory Structure
+## Directory Structure (v2)
 
 ```
 src/
 ├── core/
 │   ├── runMultistepTasks.ts   # FSM executor (framework-agnostic)
-│   └── types.ts               # StepCall, StepResult, RawResult, StepExecutor, MultistepTask
-├── engines/
-│   ├── viem.ts        # viem PublicClient.multicall
-│   ├── ethers-v6.ts   # Ethers v6 via Multicall3 aggregate3
-│   └── ethers-v5.ts   # Ethers v5 via Multicall3 aggregate3
+│   ├── types.ts               # StepCall, StepResult, BlockParam, Eip1193Provider, etc.
+│   └── abi.ts                 # Re-exports from viem/utils
+├── engine/
+│   ├── eip1193.ts             # Eip1193Executor — deployed + deployless
+│   ├── resolver.ts            # MulticallResolver — typed convenience layer
+│   ├── bytecodes.ts           # Vendored Multicall3 + deployless wrapper bytecodes
+│   └── deployments.ts         # Per-chain Multicall3 deployment block registry
 ├── handlers/
 │   ├── erc20.ts       # buildErc20Task() + resolveErc20Token() / resolveErc20TokensBulk()
 │   └── erc4626.ts     # buildErc4626Task() + resolveErc4626Vault() / resolveErc4626VaultsBulk()
-├── abis/
-│   ├── erc.ts         # ERC20 / ERC4626 JSON ABI fragments (shared by every engine)
-│   └── multicall3.ts  # Multicall3 ABI + address
 ├── __tests__/         # vitest specs mirroring the source tree
 └── index.ts           # Public API surface
 ```
 
-## Core Interfaces
+## Usage (v2)
 
 ```typescript
-// A single call to encode and send
-interface StepCall {
-  key: string;                 // routes results back to the task
-  target: `0x${string}`;       // contract address
-  abi: readonly unknown[];     // JSON ABI — used by the viem engine; ethers engines
-                               // ignore this and encode via a shared Interface
-  functionName: string;
-  args?: readonly unknown[];
-}
+import { createPublicClient, http, mainnet } from "viem"
+import { Eip1193Executor, resolveErc4626Vault } from "@halaprix/domino"
 
-// Result of a single call, after routing to its task
-interface StepResult {
-  key: string;
-  value: unknown;
-  status?: 'failure';          // present only when the call reverted/failed
-}
+const provider = createPublicClient({ chain: mainnet, transport: http() })
+const executor = new Eip1193Executor(provider)
 
-// Raw result returned by an executor, before routing
-interface RawResult {
-  status: 'success' | 'failure';
-  value?: unknown;
-}
+// Current block (default)
+const vault = await resolveErc4626Vault({
+  client: executor,
+  vault: "0x...",
+  owner: "0x...",
+})
 
-// Framework-agnostic multicall executor
-interface StepExecutor {
-  executeMulticall(calls: StepCall[]): Promise<RawResult[]>;
-}
-
-// One unit of state-dependent work
-interface MultistepTask<TResult> {
-  maxStep: number;
-  buildStepCalls(step: number): StepCall[];
-  consumeStepResults(step: number, results: StepResult[]): void;
-  finalize(): TResult;
-}
-```
-
-## Engines
-
-### Viem (primary, recommended)
-```typescript
-import { createPublicClient, http } from "viem";
-import { createResolver } from "@halaprix/domino/viem";
-
-const client = createPublicClient({ chain: mainnet, transport: http() });
-const resolver = createResolver(client);
-
-const token = await resolver.resolveErc20({ token: "0x..." });
-const vault = await resolver.resolveErc4626({ vault: "0x...", owner: "0x..." });
-const tokens = await resolver.resolveErc20Bulk({ entries: [{ token: "0x..." }, ...] });
-```
-
-### Ethers v6
-```typescript
-import { createResolver } from "@halaprix/domino/ethers-v6";
-const resolver = createResolver(ethersProvider);
-```
-
-### Ethers v5
-```typescript
-import { createResolver } from "@halaprix/domino/ethers-v5";
-const resolver = createResolver(ethersProvider);
+// Historical block
+const oldVault = await resolveErc4626Vault({
+  client: executor,
+  vault: "0x...",
+  block: { blockNumber: 19_000_000n },
+})
 ```
 
 ## Development Workflow
 
 ```bash
-# Development
-npm run dev       # watch mode with tsup
-npm test          # vitest
-npm run build     # production build
+# Before committing — MUST pass all three:
+npm run lint      # eslint (zero errors)
+npm run typecheck # tsc --noEmit (zero errors)
+npm test          # vitest (all pass)
 
-# Before committing
-npm run lint      # eslint
-npm test          # ensure all tests pass
-npm run build     # ensure typecheck + build succeeds
+# Formatting is enforced by eslint. No separate formatter needed.
+
+# Build
+npm run build     # tsup — single ESM/CJS entry
 ```
+
+**Commit rules:**
+- One commit per logical change
+- Author: `halaprix <halaprix@users.noreply.github.com>`
+- Run lint + typecheck + tests before every commit
+- No `console.log` left in production code
+- No stale imports or dead code paths
 
 ## Testing Patterns
 
 - Tests live in `src/__tests__/` mirroring the source tree.
 - Handler/FSM tests mock the `StepExecutor` (`executeMulticall`) so result routing and step-gating run for real against fake data.
-- Engine unit tests mock the transport boundary — `client.multicall` (viem) or the ethers `Interface` — so they do **not** exercise real ABI encoding.
-- `src/__tests__/engines/integration.test.ts` closes that gap: it drives a real viem `PublicClient` (stub transport) and a real ethers `Interface`, exercising actual encode/decode. Add coverage here when changing ABIs or the executors.
+- Engine tests mock the EIP-1193 provider (`request` method) — no real RPC calls.
+- Deployless tests verify bytecode integrity, encoding, and the `shouldUseDeployless()` logic.
 
 ## Key Constraints
 
-- **Never use `client.multicall` directly in handler code** — always go through `runMultistepTasks` + `StepExecutor`. This ensures consistent FSM behavior across engines.
-- ABIs live in `src/abis/erc.ts` as **JSON ABI objects** (not human-readable strings) — viem's encoder requires parsed ABI; ethers accepts the same JSON.
-- When adding a new token standard (e.g. ERC-721), add a `src/handlers/<name>.ts` exporting both a `build<Name>Task()` factory and `resolve<Name>()` convenience functions, following the ERC20/ERC4626 pattern.
-- All engines must produce identical result shapes for the same inputs — covered by `integration.test.ts`; extend it for new engines/standards.
-- **Mixed-depth batches:** tasks with a shorter `maxStep` still wait for the longest task before `finalize()` is called. This is by design — batching them together saves RPC round-trips. If early results are needed, split into separate `runMultistepTasks` calls (see JSDoc on `runMultistepTasks` for the trade-off).
+- **Never use `client.multicall` directly in handler code** — always go through `runMultistepTasks` + `StepExecutor`.
+- **Eip1193Executor** is the sole engine. No per-library engines (viem/ethers-v5/ethers-v6 removed in v2).
+- ABIs are **inlined in handler files** as `const` arrays (no separate `abis/` directory).
+- When adding a new token standard, add a `src/handlers/<name>.ts` exporting both a `build<Name>Task()` factory and `resolve<Name>()` convenience functions.
+- **Deployless fallback**: when Multicall3 wasn't deployed at the target block, the executor automatically uses CREATE-style `eth_call` with the vendored wrapper bytecode.
+- **Bytecodes are vendored** from viem's constants — do not edit by hand. Run `scripts/verify-bytecodes.ts` after viem upgrades.
+- **Mixed-depth batches:** tasks with shorter `maxStep` wait for the longest task. This is by design — batching saves RPC round-trips. Split into separate `runMultistepTasks` calls for early results.

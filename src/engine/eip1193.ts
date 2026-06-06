@@ -109,9 +109,7 @@ export class Eip1193Executor implements StepExecutor {
       lower.includes('contract not found') ||
       lower.includes('no contract at') ||
       lower.includes('empty account') ||
-      lower.includes('returned no data') ||
-      lower.includes('execution reverted') ||
-      lower.includes('invalid address')
+      lower.includes('returned no data')
     )
   }
 
@@ -143,6 +141,8 @@ export class Eip1193Executor implements StepExecutor {
       callData: encodeFunctionData({
         abi: call.abi,
         functionName: call.functionName,
+        // StepCall.args is untyped by design; viem validates at runtime
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         args: call.args as any,
       }),
     }))
@@ -174,6 +174,8 @@ export class Eip1193Executor implements StepExecutor {
       callData: encodeFunctionData({
         abi: call.abi,
         functionName: call.functionName,
+        // StepCall.args is untyped by design; viem validates at runtime
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         args: call.args as any,
       }),
     }))
