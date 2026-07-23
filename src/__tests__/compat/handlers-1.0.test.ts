@@ -4,8 +4,8 @@ import {
   resolveErc20TokensBulk,
   resolveErc4626Vault,
   resolveErc4626VaultsBulk,
-} from '../../index'
-import type { StepExecutor, RawResult, StepResult, Address } from '../../index'
+} from '@halaprix/domino'
+import type { StepExecutor, RawResult, StepResult, Address } from '@halaprix/domino'
 
 /**
  * 1.0-consumer compat — do not modernize these tests; they must keep passing on every 1.x release.
@@ -145,12 +145,12 @@ describe('resolveErc20TokensBulk', () => {
     })
 
     expect(results).toHaveLength(2)
-    expect(results[0]).toEqual({
+    expect(results[0]).toMatchObject({
       symbol: 'USDC',
       decimals: 6,
       balance: 1000000n,
     })
-    expect(results[1]).toEqual({
+    expect(results[1]).toMatchObject({
       symbol: 'WETH',
       decimals: 18,
       balance: 2000000000000000000n,

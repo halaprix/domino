@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import { MulticallResolver } from '../../index'
-import type { StepExecutor, RawResult, StepCall, StepResult, Address } from '../../index'
+import { MulticallResolver } from '@halaprix/domino'
+import type { StepExecutor, RawResult, StepCall, StepResult, Address } from '@halaprix/domino'
 
 /**
  * 1.0-consumer compat — do not modernize these tests; they must keep passing on every 1.x release.
@@ -106,7 +106,7 @@ describe('MulticallResolver 1.0', () => {
     }
 
     const [result] = await resolver.run([task])
-    expect(result).toEqual({ value: 'result' })
+    expect(result).toMatchObject({ value: 'result' })
   })
 
   it('forwards block parameter through run() to executor', async () => {

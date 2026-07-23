@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { runMultistepTasks } from '../../index'
-import type { MultistepTask, StepExecutor, StepCall, StepResult, RawResult } from '../../index'
+import { runMultistepTasks } from '@halaprix/domino'
+import type { MultistepTask, StepExecutor, StepCall, StepResult, RawResult } from '@halaprix/domino'
 
 /**
  * 1.0-consumer compat — do not modernize these tests; they must keep passing on every 1.x release.

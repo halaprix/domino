@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { runMultistepTasks, resolveErc20Token } from '../../index'
-import type { MultistepTask, StepExecutor, StepCall } from '../../index'
+import { runMultistepTasks, resolveErc20Token } from '@halaprix/domino'
+import type { MultistepTask, StepExecutor, StepCall, RawResult } from '@halaprix/domino'
 
 /**
  * 1.0-consumer compat — do not modernize these tests; they must keep passing on every 1.x release.
@@ -16,7 +16,7 @@ describe('Failure semantics 1.0', () => {
   it('skips failed calls and yields undefined; siblings succeed', async () => {
     // Simulates a call failure (revert, timeout, etc.)
     const mockExecutor: StepExecutor = {
-      async executeMulticall(): Promise<any[]> {
+      async executeMulticall(): Promise<RawResult[]> {
         return [
           { status: 'failure' }, // symbol call failed
           { status: 'success', value: 6n }, // decimals success
@@ -39,7 +39,7 @@ describe('Failure semantics 1.0', () => {
 
   it('allows batchSize > 0 and rejects batchSize <= 0', async () => {
     const mockExecutor: StepExecutor = {
-      async executeMulticall(): Promise<any[]> {
+      async executeMulticall(): Promise<RawResult[]> {
         return [{ status: 'success', value: 'USDC' }]
       },
     }
@@ -80,7 +80,7 @@ describe('Failure semantics 1.0', () => {
 
   it('rejects when executor returns wrong number of results', async () => {
     const mockExecutor: StepExecutor = {
-      async executeMulticall(calls: StepCall[]): Promise<any[]> {
+      async executeMulticall(calls: StepCall[]): Promise<RawResult[]> {
         // Return one too few — length mismatch
         return calls.slice(0, calls.length - 1).map(() => ({ status: 'success' as const, value: 'x' }))
       },
@@ -107,10 +107,12 @@ describe('Failure semantics 1.0', () => {
   })
 
   it('propagates executor rejection as batch failure (1.0 semantics)', async () => {
+    const boom = new Error('RPC timeout')
+
     const mockExecutor: StepExecutor = {
-      async executeMulticall(): Promise<any[]> {
-        // Executor rejects — batch failure propagates unchanged
-        throw new Error('RPC timeout')
+      async executeMulticall(): Promise<RawResult[]> {
+        // Executor rejects — batch failure propagates unchanged (same error object)
+        throw boom
       },
     }
 
@@ -128,14 +130,14 @@ describe('Failure semantics 1.0', () => {
       },
     }
 
-    await expect(runMultistepTasks(mockExecutor, [task])).rejects.toThrow('RPC timeout')
+    await expect(runMultistepTasks(mockExecutor, [task])).rejects.toBe(boom)
   })
 
   it('skips step 2 when step 1 yields required failures', async () => {
     let step2CallCount = 0
 
     const mockExecutor: StepExecutor = {
-      async executeMulticall(calls: StepCall[]): Promise<any[]> {
+      async executeMulticall(calls: StepCall[]): Promise<RawResult[]> {
         if (calls[0]?.key === 'balance') {
           // Step 1: balance call fails
           return [{ status: 'failure' }]

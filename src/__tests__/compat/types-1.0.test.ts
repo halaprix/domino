@@ -8,7 +8,7 @@ import type {
   Erc20TokenResolution,
   Erc4626VaultResolution,
   MultistepTask,
-} from '../../index'
+} from '@halaprix/domino'
 
 /**
  * 1.0-consumer compat — do not modernize these tests; they must keep passing on every 1.x release.
