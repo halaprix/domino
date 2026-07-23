@@ -6,7 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [1.2.0] — 2026-07-23
 
 ### Added
-- `maxConcurrentBatches` (default 1): within-step concurrency pool for physical batch dispatch; completion-order-independent result routing; fail-fast cancellation for `run` (queued batches undispatched, in-flight settle, deterministic error selection); `runSettled` never cancels queued batches.
+- `maxConcurrentBatches` (default 1): within-step concurrency pool for physical batch dispatch; completion-order-independent result routing; fail-fast cancellation for `run` (queued batches undispatched, in-flight settle, deterministic error selection when exactly one batch fails); `runSettled` never cancels queued batches.
 - `adaptiveBatching` (default false): bisection of transport-failed batches through the central queue, bounded by `maxBatchAttempts` (default `2·⌈log₂(batchSize)⌉+1`, every execution counts; exhaustion → coarse `kind: 'batch'` failures with `cause` = last transport error, never wrong data); deadlock-free by construction; reverts never retried.
 - `dedupe` (default false): within-step cross-task merge of eligible calls keyed on `(target, calldata, canonical output signature)` with selector-resolved overloads; fan-out of success and failure to all subscribers; only `TypedCallSpec` calls eligible (legacy tasks never affected).
 - `Presets.throughput = { maxConcurrentBatches: 5, adaptiveBatching: true, dedupe: true }` — ready-made preset for portfolio/index workloads.

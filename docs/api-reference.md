@@ -292,7 +292,7 @@ Always present on both branches — never optional, even when empty (`{ optional
 
 When `executor.executeMulticall` rejects for a physical batch, `runSettled` does not throw. Every call in that batch becomes a failure carrying its own `DominoCallError` (`kind: 'batch'`) — every one of those errors shares the SAME underlying transport error as `cause`, but each call gets its own `DominoCallError` instance. Execution continues: later batches in the same step, and later steps, still run; tasks whose `finalize()` copes with the resulting failures (or `defineTask` tasks where none of the failed calls are reachable from the returned shape) still settle `fulfilled`.
 
-Adaptive bisection (`adaptiveBatching: true`, off by default) automatically splits a failed batch in half and retries both halves independently, recursing until every call is isolated to its own single-call execution or `maxBatchAttempts` is exhausted. See the [`adaptiveBatching` field](#batching-options) below for when to enable it and its failure semantics.
+Adaptive bisection (`adaptiveBatching: true`, off by default) automatically splits a failed batch in half and retries both halves independently; rejected regions recurse until they succeed, reach a single call, or exhaust `maxBatchAttempts`, while successful sub-batches are kept immediately. See the [`adaptiveBatching` field](#batching-options) below for when to enable it and its failure semantics.
 
 ## Batching Options
 
@@ -300,7 +300,7 @@ Adaptive bisection (`adaptiveBatching: true`, off by default) automatically spli
 
 | Field | Type | Default | Rationale |
 |---|---|---|---|
-| `batchSize` | `number` | `100` | Multicall3 aggregate3 has per-call gas limits. Split large steps into sequential batches to stay under the limit. Must be positive. |
+| `batchSize` | `number` | `100` | Batching keeps each aggregate `eth_call` under provider gas/payload/response limits. One very expensive call cannot be fixed by splitting; this parameter splits the logical step, not individual calls. Must be positive. |
 | `maxConcurrentBatches` | `number` | `1` | Provider rate limits and executor design typically assume serial execution. Set to >1 only if your provider/executor supports parallelism; `run` fail-fast cancels queued batches, `runSettled` does not. |
 | `adaptiveBatching` | `boolean` | `false` | Bisection cannot distinguish a per-call failure (e.g. out-of-gas) from a transient transport problem (e.g. HTTP 429 rate-limiting); under rate-limiting, retries amplify load by up to 2N−1 calls for a single original batch. Enable only when your transport failures are dominated by bad calls, not rate limits; a future failure-cause classification may allow enabling by default. |
 | `maxBatchAttempts` | `number` | `2·⌈log₂(batchSize)⌉+1` | Bounds bisection recursion. Default is sized for the common single-bad-call case; batches with multiple failing calls may exhaust it before every one is isolated (producing coarser-grained `kind: 'batch'` failures instead, never wrong data). |
