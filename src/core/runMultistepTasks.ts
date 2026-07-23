@@ -119,7 +119,14 @@ export async function runMultistepTasks<TResult>(
           if (result.status === 'success') {
             list.push({ status: 'success', key, value: result.value })
           } else {
-            list.push({ status: 'failure', key })
+            // Forward the SAME error object — never wrap or discard it.
+            // exactOptionalPropertyTypes-safe: only include `error` when the
+            // RawResult actually carried one.
+            list.push({
+              status: 'failure',
+              key,
+              ...('error' in result && result.error !== undefined ? { error: result.error } : {}),
+            })
           }
         }
       }

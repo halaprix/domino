@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
-import { parseAbi, encodeFunctionResult, encodeAbiParameters } from 'viem'
+import { parseAbi, encodeFunctionResult, encodeAbiParameters, encodeErrorResult } from 'viem'
 import { Eip1193Executor } from '../../engine/eip1193'
+import { DominoCallError } from '../../core/errors'
 
 // Helper to encode an aggregate3 response with one successful call
 function encodeAggregate3Result(innerAbi: readonly unknown[], fn: string, innerResult: unknown): string {
@@ -23,6 +24,25 @@ function encodeAggregate3Failure(): string {
   const result = encodeAbiParameters(
     [{ type: 'tuple[]', components: [{ name: 'success', type: 'bool' }, { name: 'returnData', type: 'bytes' }] }],
     [[{ success: false, returnData: '0x' }]],
+  )
+  return result
+}
+
+// Helper to encode an aggregate3 response with one failed call carrying specific returnData bytes.
+function encodeAggregate3FailureWithData(returnData: `0x${string}`): string {
+  const result = encodeAbiParameters(
+    [{ type: 'tuple[]', components: [{ name: 'success', type: 'bool' }, { name: 'returnData', type: 'bytes' }] }],
+    [[{ success: false, returnData }]],
+  )
+  return result
+}
+
+// Helper to encode an aggregate3 response with one successful call carrying raw (possibly
+// undecodable) returnData bytes — used to simulate garbage/empty data from a code-less address.
+function encodeAggregate3ResultRaw(returnData: `0x${string}`): string {
+  const result = encodeAbiParameters(
+    [{ type: 'tuple[]', components: [{ name: 'success', type: 'bool' }, { name: 'returnData', type: 'bytes' }] }],
+    [[{ success: true, returnData }]],
   )
   return result
 }
@@ -127,6 +147,97 @@ describe('Eip1193Executor', () => {
 
     expect(results).toHaveLength(1)
     expect(results[0]!.status).toBe('failure')
+    const failure = results[0] as { status: 'failure'; error?: unknown }
+    expect(failure.error).toBeInstanceOf(DominoCallError)
+    expect((failure.error as DominoCallError).kind).toBe('revert')
+  })
+
+  it('reverted call with returnData bytes → DominoCallError kind "revert", data === those bytes, no cause', async () => {
+    // Error(string) revert payload for "insufficient balance"
+    const revertData = encodeErrorResult({
+      abi: parseAbi(['error Error(string)']),
+      errorName: 'Error',
+      args: ['insufficient balance'],
+    })
+    const mockResult = encodeAggregate3FailureWithData(revertData)
+
+    const provider = {
+      request: vi.fn()
+        .mockResolvedValueOnce('0x1') // eth_chainId
+        .mockResolvedValueOnce(mockResult), // eth_call
+    }
+
+    const executor = new Eip1193Executor(provider)
+    const results = await executor.executeMulticall([
+      { key: 'bad', target: WETH, abi: totalSupplyAbi, functionName: 'totalSupply' },
+    ])
+
+    expect(results).toHaveLength(1)
+    const failure = results[0] as { status: 'failure'; error?: unknown }
+    expect(failure.status).toBe('failure')
+    const err = failure.error as DominoCallError
+    expect(err).toBeInstanceOf(DominoCallError)
+    expect(err.kind).toBe('revert')
+    expect(err.data).toBe(revertData)
+    expect(err.target).toBe(WETH)
+    expect(err.functionName).toBe('totalSupply')
+    expect(err.key).toBe('bad')
+    expect(err.cause).toBeUndefined()
+    // Must be genuinely absent, not an own `cause: undefined` property.
+    expect(Object.hasOwn(err, 'cause')).toBe(false)
+  })
+
+  it('success=true but garbage returnData that fails decoding → kind "decode", data = garbage bytes, cause = decode error', async () => {
+    // Garbage bytes: not a valid ABI-encoded uint256 tail (too short to decode as uint256).
+    const garbage = '0xdeadbeef' as const
+    const mockResult = encodeAggregate3ResultRaw(garbage)
+
+    const provider = {
+      request: vi.fn()
+        .mockResolvedValueOnce('0x1') // eth_chainId
+        .mockResolvedValueOnce(mockResult), // eth_call
+    }
+
+    const executor = new Eip1193Executor(provider)
+    const results = await executor.executeMulticall([
+      { key: 'garbage', target: WETH, abi: totalSupplyAbi, functionName: 'totalSupply' },
+    ])
+
+    expect(results).toHaveLength(1)
+    const failure = results[0] as { status: 'failure'; error?: unknown }
+    expect(failure.status).toBe('failure')
+    const err = failure.error as DominoCallError
+    expect(err).toBeInstanceOf(DominoCallError)
+    expect(err.kind).toBe('decode')
+    expect(err.data).toBe(garbage)
+    expect(err.cause).toBeDefined()
+    expect((err.cause as Error).stack).toBeTruthy()
+    expect(err.target).toBe(WETH)
+    expect(err.functionName).toBe('totalSupply')
+    expect(err.key).toBe('garbage')
+  })
+
+  it("success=true, returnData '0x' from a code-less address, ABI expects uint256 output → kind 'decode', data === '0x'", async () => {
+    const mockResult = encodeAggregate3ResultRaw('0x')
+
+    const provider = {
+      request: vi.fn()
+        .mockResolvedValueOnce('0x1') // eth_chainId
+        .mockResolvedValueOnce(mockResult), // eth_call
+    }
+
+    const executor = new Eip1193Executor(provider)
+    const results = await executor.executeMulticall([
+      { key: 'empty', target: WETH, abi: totalSupplyAbi, functionName: 'totalSupply' },
+    ])
+
+    expect(results).toHaveLength(1)
+    const failure = results[0] as { status: 'failure'; error?: unknown }
+    expect(failure.status).toBe('failure')
+    const err = failure.error as DominoCallError
+    expect(err).toBeInstanceOf(DominoCallError)
+    expect(err.kind).toBe('decode')
+    expect(err.data).toBe('0x')
   })
 
   it('returns empty array for zero calls', async () => {
