@@ -37,10 +37,11 @@
  * `consumeStepResults`/`finalize`) throws".
  */
 
-import type { MultistepTask, StepCall, StepResult, StepExecutor, RawResult, Address } from './types'
+import type { MultistepTask, StepExecutor, RawResult, Address } from './types'
 import type { BatchOptions } from './runMultistepTasks'
 import { DominoCallError } from './errors'
 import { prepareRun, resolvePinnedBlock } from './internal'
+import { runSteps, type StepEnginePolicy } from './engine'
 
 /**
  * Internal-only diagnostics channel (F2). A compiled `defineTask()` output
@@ -116,115 +117,89 @@ export async function runSettled<TResult>(
   // `runSettled(executor, [], { batchSize: 0 })` rejects rather than
   // silently resolving to `[]` (unchanged 1.0 ordering — contrast with
   // `runMultistepTasks`, which checks the empty-tasks shortcut first).
-  const batchSize = prepareRun(ts, options)
+  const { batchSize, maxConcurrentBatches } = prepareRun(ts, options)
 
   if (ts.length === 0) return []
 
   await resolvePinnedBlock()
 
-  const maxStep = ts.reduce((max, task) => (task.maxStep > max ? task.maxStep : max), 0)
-
   // Dead-task bookkeeping: once true, no further buildStepCalls/consumeStepResults
   // calls happen for that task index, and finalize() is skipped entirely.
+  // Lives here (not in the shared engine) — it's `runSettled`-specific state
+  // that its policy hooks close over; the engine never sees it directly.
   const dead: boolean[] = new Array(ts.length).fill(false)
   const deadError: unknown[] = new Array(ts.length)
 
-  for (let step = 1; step <= maxStep; step++) {
-    const calls: StepCall[] = []
-    const mapping: { taskIndex: number; key: string }[] = []
-
-    for (let taskIndex = 0; taskIndex < ts.length; taskIndex++) {
-      if (dead[taskIndex]) continue
+  // `runSettled`'s record-and-continue policy (F6a) — see
+  // `src/core/engine.ts`'s doc comment for the full hook contract.
+  const policy: StepEnginePolicy = {
+    buildStepCalls(taskIndex, step) {
+      if (dead[taskIndex]) return undefined
       const task = ts[taskIndex]!
-      if (step > task.maxStep) continue
-
-      let stepCalls: StepCall[]
+      if (step > task.maxStep) return undefined
       try {
-        stepCalls = task.buildStepCalls(step)
+        return task.buildStepCalls(step)
       } catch (err) {
         dead[taskIndex] = true
         deadError[taskIndex] = err
-        continue
+        return undefined
       }
+    },
 
-      for (const call of stepCalls) {
-        calls.push(call)
-        mapping.push({ taskIndex, key: call.key })
-      }
-    }
-
-    const perTaskResults: StepResult[][] = Array.from({ length: ts.length }, () => [])
-
-    if (calls.length > 0) {
-      for (let batchStart = 0; batchStart < calls.length; batchStart += batchSize) {
-        const batch = calls.slice(batchStart, batchStart + batchSize)
-
-        let results: RawResult[]
-        try {
-          results = await executor.executeMulticall(batch, options?.block)
-        } catch (transportError) {
-          // Batch-level failure: every call in THIS physical batch fails with
-          // its own DominoCallError, all sharing the SAME cause. Do not
-          // rethrow — later batches/steps still execute.
-          results = batch.map(
-            (call): RawResult => ({
-              status: 'failure',
-              error: new DominoCallError(`Call ${call.key} failed: containing batch rejected`, {
-                kind: 'batch',
-                cause: transportError,
-                target: call.target,
-                functionName: call.functionName,
-                key: call.key,
-              }),
+    async executeBatch(batch) {
+      let results: RawResult[]
+      try {
+        results = await executor.executeMulticall(batch, options?.block)
+      } catch (transportError) {
+        // Batch-level failure: every call in THIS physical batch fails with
+        // its own DominoCallError, all sharing the SAME cause. Resolve
+        // (never reject) — this is what makes `runSettled` never cancel:
+        // `runBatchPool`'s fail-fast machinery only triggers on a REJECTION
+        // from this hook, and an ordinary transport failure never produces
+        // one here. Later batches/steps still execute.
+        return batch.map(
+          (call): RawResult => ({
+            status: 'failure',
+            error: new DominoCallError(`Call ${call.key} failed: containing batch rejected`, {
+              kind: 'batch',
+              cause: transportError,
+              target: call.target,
+              functionName: call.functionName,
+              key: call.key,
             }),
-          )
-        }
-
-        // Dev-time guard (same as `run`): an executor that resolved but
-        // returned the wrong number of results would silently corrupt
-        // routing. This is an executor-implementation bug, not a call
-        // failure, so it is NOT converted into a batch StepResult — it
-        // aborts `runSettled` entirely, same as an invalid batchSize.
-        if (results.length !== batch.length) {
-          throw new Error(
-            `StepExecutor returned ${results.length} results for ${batch.length} calls — length mismatch`,
-          )
-        }
-
-        for (let i = 0; i < results.length; i++) {
-          const mappingEntry = mapping[batchStart + i]
-          if (!mappingEntry) continue
-          const { taskIndex, key } = mappingEntry
-          const result = results[i] as RawResult
-
-          const list = perTaskResults[taskIndex]!
-          if (result.status === 'success') {
-            list.push({ status: 'success', key, value: result.value })
-          } else {
-            // Forward the SAME error object — never wrap or discard it.
-            list.push({
-              status: 'failure',
-              key,
-              ...('error' in result && result.error !== undefined ? { error: result.error } : {}),
-            })
-          }
-        }
+          }),
+        )
       }
-    }
 
-    for (let i = 0; i < ts.length; i++) {
-      if (dead[i]) continue
-      const task = ts[i]
+      // Dev-time guard (same as `run`): an executor that resolved but
+      // returned the wrong number of results would silently corrupt
+      // routing. This is an executor-implementation bug, not a call
+      // failure, so it is NOT converted into a batch StepResult — it
+      // rejects this hook, which aborts `runSettled` entirely (via the
+      // pool's ordinary fail-fast path) same as an invalid batchSize.
+      if (results.length !== batch.length) {
+        throw new Error(
+          `StepExecutor returned ${results.length} results for ${batch.length} calls — length mismatch`,
+        )
+      }
+      return results
+    },
+
+    consumeStepResults(taskIndex, step, results) {
+      if (dead[taskIndex]) return
+      const task = ts[taskIndex]
       if (task && step <= task.maxStep) {
         try {
-          task.consumeStepResults(step, perTaskResults[i]!)
+          task.consumeStepResults(step, results)
         } catch (err) {
-          dead[i] = true
-          deadError[i] = err
+          dead[taskIndex] = true
+          deadError[taskIndex] = err
         }
       }
-    }
+    },
   }
+
+  await runSteps(ts, { batchSize, maxConcurrentBatches }, policy)
 
   return ts.map((task, i): SettledTaskResult<TResult> => {
     // Read the task's OWN live diagnostics if it carries the channel (defineTask,

@@ -14,5 +14,6 @@ export default defineConfig({
     globals: true,
     environment: "node",
     include: ["src/__tests__/compat/**/*.test.ts"],
+    setupFiles: ["./src/__tests__/setup/unhandled-rejections.ts"],
   },
 });
