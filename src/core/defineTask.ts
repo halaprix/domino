@@ -320,6 +320,12 @@ export function defineTask<const S>(build: (t: TaskBuilder) => S): MultistepTask
         continue
       }
 
+      // r.error may be: a real DominoCallError (forward as-is), some OTHER
+      // raw error from a custom StepExecutor (synthesize, but preserve it as
+      // `cause` — never discard it), or genuinely absent (synthesize with no
+      // cause at all). Conflating "wrong type" with "absent" would silently
+      // destroy a custom executor's raw error — the one thing this taxonomy
+      // promises never happens.
       const error =
         r.error instanceof E
           ? r.error
@@ -328,6 +334,7 @@ export function defineTask<const S>(build: (t: TaskBuilder) => S): MultistepTask
               functionName: n.nm!,
               key: r.key,
               ...tgt(n),
+              ...(r.error !== undefined ? { cause: r.error } : {}),
             })
       fail(n, error)
     }

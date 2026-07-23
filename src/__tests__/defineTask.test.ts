@@ -280,6 +280,28 @@ describe('defineTask — failure propagation', () => {
     expect((settled as { status: 'rejected'; error: unknown }).error).toBe(boom)
     expect(settled!.diagnostics).toEqual({ optionalFailures: [] })
   })
+
+  it('a custom executor returning a failure carrying a raw (non-DominoCallError) error never discards it: the synthesized DominoCallError.cause is that exact object', async () => {
+    const rawBoom = new Error('raw boom')
+    const executor: StepExecutor = {
+      async executeMulticall(calls): Promise<RawResult[]> {
+        return calls.map((): RawResult => ({ status: 'failure', error: rawBoom }))
+      },
+    }
+
+    const task = defineTask((t) => ({
+      a: t.call({ target: ADDR, abi: testAbi, functionName: 'getNum', args: [1n] }),
+    }))
+
+    const [settled] = await runSettled(executor, [task])
+    expect(settled!.status).toBe('rejected')
+    const err = (settled as { status: 'rejected'; error: unknown }).error as DominoCallError
+    expect(err).toBeInstanceOf(DominoCallError)
+    expect(err.kind).toBe('batch')
+    // The raw error must be preserved as `cause` — never discarded, never
+    // conflated with the "no error at all" case (which omits `cause` entirely).
+    expect(err.cause).toBe(rawBoom)
+  })
 })
 
 describe('defineTask — optional escape hatch', () => {

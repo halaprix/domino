@@ -13,8 +13,13 @@
  * delta (this PR, raw `dist/index.js` byte length via `readFileSync(...,
  * 'utf-8').length`, same metric this test asserts on):
  *   before: 36,360 bytes (35.51KB)  gzip 8,241 bytes (8.05KB)
- *   after:  40,853 bytes (39.90KB)  gzip 9,733 bytes (9.50KB)
- *   delta:  +4,493 bytes raw (+4.39KB)  +1,492 bytes gzip (+1.46KB)
+ *   after:  40,910 bytes (39.95KB)  gzip 9,745 bytes (9.52KB)
+ *   delta:  +4,550 bytes raw (+4.44KB)  +1,504 bytes gzip (+1.47KB)
+ * (The "after" figures include the controller-review fix that preserves a
+ * custom executor's raw error as `cause` on the synthesized batch error —
+ * +57 bytes raw over the pre-fix measurement, still under the 40KB ceiling
+ * with 50 bytes to spare; see that fix's own note further down this file's
+ * history / the task report.)
  * `defineTask` + `refs.ts` compile to ~4.4KB raw / ~1.9KB gzip on their own
  * (measured by isolating their banner-commented section of the bundle) —
  * within the F2 spec's "≤3KB gzip" per-layer budget once the ~0.4KB gzip
