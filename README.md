@@ -266,6 +266,7 @@ Works with `blockHash`, `blockTag`, or `blockNumber`. Even on chains where Multi
 - [Architecture & AI Context](CLAUDE.md)
 - [API Reference](docs/api-reference.md)
 - [Benchmarks](docs/benchmarks.md)
+- [Refinance example](examples/refinance.ts) — Aave v3/Spark/Morpho across chains, dynamic `Ref<Address>` targets, `Presets.throughput`, `MultichainResolver`
 - [Migration Guide](MIGRATION.md)
 - [Changelog](CHANGELOG.md)
 
