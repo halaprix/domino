@@ -142,12 +142,13 @@ const DEDUPE_ELIGIBLE = Symbol('domino.dedupeEligible')
  *
  * Field names are deliberately terse — this interface (and every helper
  * below it) is 100% private, closure-scoped implementation, never observed
- * by a consumer or even another module, so the usual "spell it out" bias
- * loses to the F2 acceptance budget (raw bundle size). Legend: `dep` depth,
- * `ab` call abi, `nm` call functionName, `ar` call target+args (position 0
- * is ALWAYS the target, `ar.slice(1)` the actual args — folded together so
- * depth computation and resolution share one list/loop instead of two),
- * `op` call optional, `dd` call dedupeEligible, `ins` derive inputs.
+ * by a consumer or even another module. The terseness is a legacy artifact
+ * of a retired raw-byte bundle budget; future code should prefer descriptive
+ * names. Legend: `dep` depth, `ab` call abi, `nm` call functionName, `ar`
+ * call target+args (position 0 is ALWAYS the target, `ar.slice(1)` the
+ * actual args — folded together so depth computation and resolution share
+ * one list/loop instead of two), `op` call optional, `dd` call
+ * dedupeEligible, `ins` derive inputs.
  */
 interface Node {
   readonly dep: number

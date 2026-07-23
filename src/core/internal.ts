@@ -32,10 +32,10 @@
  * detection) and it costs bundle size for a nicety, not a correctness need.
  *
  * **Naming:** below this point, local/parameter names are deliberately
- * terse (`t`/`ts`/`o` for task/tasks/options) — this module is 100%
- * internal (never imported outside `defineTask.ts`/`erc20.ts`/`erc4626.ts`/
- * the two runners), so the usual "spell it out" bias loses to the F2
- * bundle-size budget, same tradeoff `defineTask.ts`'s `Node` makes.
+ * terse (`t`/`ts`/`o` for task/tasks/options) — a legacy artifact of a
+ * retired raw-byte bundle budget. This module is 100% internal (never
+ * imported outside `defineTask.ts`/`erc20.ts`/`erc4626.ts`/the two runners),
+ * so future code should prefer descriptive names.
  */
 
 import type { MultistepTask } from './types'
