@@ -7,12 +7,39 @@
  * Without owner:     Step 1 only  (symbol, decimals, asset)
  * With owner:        Step 1 + Step 2 (symbol, decimals, asset, balanceOf, maxWithdraw,
  *                    maxRedeem → then convertToAssets(balance))
+ *
+ * (G1) Internally reimplemented on `defineTask` — public `buildErc4626Task`/
+ * `resolveErc4626*` signatures and return shapes are unchanged from 1.0. Every
+ * contract call is `optional: true`, replicating 1.0's silent-undefined-
+ * per-field semantics. `convertToAssets` takes the RAW `balanceOf` call ref
+ * (not the coerced value) as its `args` — this is what replicates the old
+ * step-2 gating exactly: a failed/malformed balance demotes that ref to
+ * `undefined`, which a call can never encode, so `convertToAssets` is
+ * skip-chained (never dispatched) instead of being called with a bogus
+ * argument — matching 1.0's `if (ctx.balance === undefined) return []`.
+ * `position`'s conditional-key shape (T11) is reproduced with `t.derive`:
+ * `undefined` when balance never resolved, else an object with `maxWithdraw`/
+ * `maxRedeem` keys present ONLY when those calls resolved (never
+ * present-with-`undefined`) — see `src/__tests__/parity-g1.test.ts`, which
+ * `toStrictEqual`s this against the pre-migration oracle at
+ * `src/__tests__/fixtures/legacy-handlers/erc4626.ts` (deleted after one
+ * minor — see its header comment).
+ *
+ * **Accepted behavioral delta (documented, not parity-breaking — see the
+ * parity test):** under `runSettled`, each `optional` call's
+ * `DominoCallError` is now retained in `diagnostics.optionalFailures` instead
+ * of being silently destroyed (the legacy implementation carried no
+ * diagnostics channel at all). Resolved VALUES are byte-for-byte unchanged
+ * either way. New calls are also dedup-ELIGIBLE (`TypedCallSpec`-compiled) —
+ * `{ dedupe: true }` can now merge identical calls across bulk entries
+ * (e.g. two vaults sharing the same owner never merge, since `target`
+ * differs, but the metadata calls of two entries pointed at the SAME vault
+ * would); legacy hand-authored `StepCall`s were never eligible.
  */
 
-import type { Address, MultistepTask, StepCall, StepResult, BlockParam } from '../core/types'
+import type { Address, MultistepTask, BlockParam } from '../core/types'
+import { defineTask } from '../core/defineTask'
 import { runMultistepTasks } from '../core/runMultistepTasks'
-import { SINGLE_USE } from '../core/internal'
-import type { SingleUseCarrier } from '../core/internal'
 import type { ExecutorParam } from './executorParam'
 import { resolveExecutor } from './executorParam'
 
@@ -97,19 +124,12 @@ export interface Erc4626VaultResolution {
     | undefined
 }
 
-type Erc4626Context = {
-  symbol?: string
-  decimals?: number
-  balance?: bigint
-  maxWithdraw?: bigint
-  maxRedeem?: bigint
-  underlyingAsset?: Address
-  assets?: bigint
-}
-
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
-// Typed accessor helpers — safe coercion from the untyped RawResult.value.
+// Typed accessor helpers — safe coercion from the untyped call result.
+// Unchanged from the pre-defineTask implementation (see the legacy oracle) —
+// reused here via `t.derive` so 1.0's defensive coercion behavior survives
+// the migration byte-for-byte (this is what the compat suite pins).
 const asString = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined)
 const asBigInt = (v: unknown): bigint | undefined => (typeof v === 'bigint' ? v : undefined)
 const asNumber = (v: unknown): number | undefined => {
@@ -118,17 +138,6 @@ const asNumber = (v: unknown): number | undefined => {
 }
 const asAddress = (v: unknown): Address | undefined =>
   typeof v === 'string' && v.startsWith('0x') ? (v as Address) : undefined
-
-// Routing key constants — compile-time protection against typos in key strings.
-const KEYS = {
-  symbol: 'symbol',
-  decimals: 'decimals',
-  asset: 'asset',
-  balance: 'balance',
-  maxWithdraw: 'maxWithdraw',
-  maxRedeem: 'maxRedeem',
-  assets: 'assets',
-} as const
 
 // ─── Domain layer ─────────────────────────────────────────────────────────────
 // buildErc4626Task — pure MultistepTask factory; no orchestration dependency.
@@ -139,115 +148,97 @@ export function buildErc4626Task(params: {
   owner?: Address
 }): MultistepTask<Erc4626VaultResolution> {
   const { vault, owner } = params
-  const ctx: Erc4626Context = {}
-  const hasOwner = !!owner
 
-  return {
-    maxStep: hasOwner ? 2 : 1,
+  return defineTask((t) => {
+    // Creation order matters (parity with 1.0's step-1 call order, and with
+    // positional mock-executor fixtures): symbol, decimals, asset.
+    const symbolCall = t.call({ target: vault, abi: erc20Abi, functionName: 'symbol', optional: true })
+    const decimalsCall = t.call({ target: vault, abi: erc20Abi, functionName: 'decimals', optional: true })
+    const assetCall = t.call({ target: vault, abi: erc4626Abi, functionName: 'asset', optional: true })
 
-    buildStepCalls(step) {
-      if (step === 1) {
-        const calls: StepCall[] = [
-          { key: KEYS.symbol, target: vault, abi: erc20Abi, functionName: 'symbol' },
-          { key: KEYS.decimals, target: vault, abi: erc20Abi, functionName: 'decimals' },
-          { key: KEYS.asset, target: vault, abi: erc4626Abi, functionName: 'asset' },
-        ]
-        if (owner) {
-          calls.push(
-            {
-              key: KEYS.balance,
-              target: vault,
-              abi: erc20Abi,
-              functionName: 'balanceOf',
-              args: [owner],
-            },
-            {
-              key: KEYS.maxWithdraw,
-              target: vault,
-              abi: erc4626Abi,
-              functionName: 'maxWithdraw',
-              args: [owner],
-            },
-            {
-              key: KEYS.maxRedeem,
-              target: vault,
-              abi: erc4626Abi,
-              functionName: 'maxRedeem',
-              args: [owner],
-            },
-          )
-        }
-        return calls
-      }
+    const symbol = t.derive([symbolCall], asString)
+    const decimals = t.derive([decimalsCall], asNumber)
+    const underlyingAsset = t.derive([assetCall], asAddress)
 
-      if (step === 2 && hasOwner) {
-        if (ctx.balance === undefined) return []
-        return [
-          {
-            key: KEYS.assets,
-            target: vault,
-            abi: erc4626Abi,
-            functionName: 'convertToAssets',
-            args: [ctx.balance],
-          },
-        ]
-      }
-
-      return []
-    },
-
-    consumeStepResults(step, results: StepResult[]) {
-      for (const result of results) {
-        if (result.status === 'failure') continue
-        // TypeScript narrows result to the success branch here.
-        // exactOptionalPropertyTypes: only assign when the value is defined.
-        if (step === 1) {
-          const sym = result.key === KEYS.symbol ? asString(result.value) : undefined
-          if (sym !== undefined) ctx.symbol = sym
-          const dec = result.key === KEYS.decimals ? asNumber(result.value) : undefined
-          if (dec !== undefined) ctx.decimals = dec
-          const asset = result.key === KEYS.asset ? asAddress(result.value) : undefined
-          if (asset !== undefined) ctx.underlyingAsset = asset
-          if (hasOwner) {
-            const bal = result.key === KEYS.balance ? asBigInt(result.value) : undefined
-            if (bal !== undefined) ctx.balance = bal
-            const mw = result.key === KEYS.maxWithdraw ? asBigInt(result.value) : undefined
-            if (mw !== undefined) ctx.maxWithdraw = mw
-            const mr = result.key === KEYS.maxRedeem ? asBigInt(result.value) : undefined
-            if (mr !== undefined) ctx.maxRedeem = mr
-          }
-        }
-        if (step === 2 && result.key === KEYS.assets) {
-          const assets = asBigInt(result.value)
-          if (assets !== undefined) ctx.assets = assets
-        }
-      }
-    },
-
-    finalize(): Erc4626VaultResolution {
+    if (!owner) {
       return {
         metadata: {
-          symbol: ctx.symbol,
-          decimals: ctx.decimals,
-          underlyingAsset: ctx.underlyingAsset,
-          maxWithdraw: ctx.maxWithdraw,
-          maxRedeem: ctx.maxRedeem,
+          symbol,
+          decimals,
+          underlyingAsset,
+          maxWithdraw: undefined,
+          maxRedeem: undefined,
         },
-        position:
-          hasOwner && ctx.balance !== undefined
-            ? {
-                balance: ctx.balance,
-                assets: ctx.assets,
-                // exactOptionalPropertyTypes: conditional spread only when defined
-                ...(ctx.maxWithdraw !== undefined ? { maxWithdraw: ctx.maxWithdraw } : {}),
-                ...(ctx.maxRedeem !== undefined ? { maxRedeem: ctx.maxRedeem } : {}),
-              }
-            : undefined,
+        position: undefined,
       }
-    },
+    }
 
-    [SINGLE_USE]: true,
-  } as MultistepTask<Erc4626VaultResolution> & SingleUseCarrier
+    // Continuing step-1 creation order: balanceOf, maxWithdraw, maxRedeem.
+    const balanceCall = t.call({
+      target: vault,
+      abi: erc20Abi,
+      functionName: 'balanceOf',
+      args: [owner],
+      optional: true,
+    })
+    const maxWithdrawCall = t.call({
+      target: vault,
+      abi: erc4626Abi,
+      functionName: 'maxWithdraw',
+      args: [owner],
+      optional: true,
+    })
+    const maxRedeemCall = t.call({
+      target: vault,
+      abi: erc4626Abi,
+      functionName: 'maxRedeem',
+      args: [owner],
+      optional: true,
+    })
+
+    const maxWithdraw = t.derive([maxWithdrawCall], asBigInt)
+    const maxRedeem = t.derive([maxRedeemCall], asBigInt)
+
+    // Depth 2 (step 2): args take the RAW balanceCall ref (not the coerced
+    // `balance` derive below) — see the module doc comment for why this is
+    // what replicates 1.0's step-2 gating exactly (skip-chained, never
+    // dispatched, when balance failed or came back malformed).
+    const assetsCall = t.call({
+      target: vault,
+      abi: erc4626Abi,
+      functionName: 'convertToAssets',
+      args: [balanceCall],
+      optional: true,
+    })
+
+    const balance = t.derive([balanceCall], asBigInt)
+    const assets = t.derive([assetsCall], asBigInt)
+
+    const position = t.derive(
+      [balance, assets, maxWithdraw, maxRedeem],
+      (balanceV, assetsV, maxWithdrawV, maxRedeemV) => {
+        if (balanceV === undefined) return undefined
+        return {
+          balance: balanceV,
+          assets: assetsV,
+          // exactOptionalPropertyTypes: conditional spread only when defined
+          ...(maxWithdrawV !== undefined ? { maxWithdraw: maxWithdrawV } : {}),
+          ...(maxRedeemV !== undefined ? { maxRedeem: maxRedeemV } : {}),
+        }
+      },
+    )
+
+    return {
+      metadata: {
+        symbol,
+        decimals,
+        underlyingAsset,
+        maxWithdraw,
+        maxRedeem,
+      },
+      position,
+    }
+  })
 }
 
 // ─── Application layer ────────────────────────────────────────────────────────

@@ -131,6 +131,18 @@
  *   before: 65,226 bytes (63.70KB)  gzip 17,065 bytes (16.67KB)
  *   after:  66,345 bytes (64.79KB)  gzip 17,533 bytes (17.12KB)
  *   delta:  +1,119 bytes raw (+1.09KB)  +468 bytes gzip (+0.46KB)
+ *
+ * 1.3 (G1 handler migration): `buildErc20Task`/`buildErc4626Task` reimplemented
+ * on `defineTask` (public signatures unchanged — see
+ * `src/__tests__/parity-g1.test.ts`). NET DECREASE, not neutral: the
+ * hand-written per-field `consumeStepResults`/`finalize` routing the two
+ * handlers used to carry is now expressed as `t.call`/`t.derive` composition
+ * over the already-bundled `defineTask` engine, so the marginal cost of each
+ * handler shrinks to its ABI arrays + four tiny coercion helpers. Measured
+ * delta:
+ *   before: 66,345 bytes (64.79KB)  gzip 17,533 bytes (17.12KB)
+ *   after:  64,510 bytes (63.00KB)  gzip 17,185 bytes (16.79KB)
+ *   delta:  -1,835 bytes raw (-1.79KB)  -348 bytes gzip (-0.34KB)
  */
 
 import { describe, expect, it } from 'vitest'
