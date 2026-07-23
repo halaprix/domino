@@ -97,6 +97,33 @@ export interface BatchOptions {
 
   /** Block to query at (defaults to 'latest'). Same block used for ALL steps. */
   block?: BlockParam
+
+  /**
+   * Enable within-step, cross-task call dedup (F7): before the wire list for
+   * a step reaches batching/bisection, calls that are dedup-ELIGIBLE and
+   * share the same `(target.toLowerCase(), calldata, canonicalOutputSignature)`
+   * key are merged into a single physical call — its result (success or
+   * failure) is then fanned out to every subscriber. Default: `false`.
+   *
+   * **Eligibility is per-call**, not per-run: a hand-authored legacy
+   * `StepCall` is never eligible (no mutability promise was ever made for
+   * it), so turning this on can never change legacy-task semantics — see
+   * `TypedCallSpec.dedupe` (default `true`; set `dedupe: false` on an
+   * individual call to opt it out). `view`/`pure` alone do not guarantee
+   * referential transparency, hence "eligible", not "safe" — this is a
+   * caller opt-in, not something inferred from ABI mutability.
+   *
+   * **Conflicting output ABIs never merge:** calldata alone (selector +
+   * inputs) does not capture how a caller intends to DECODE the result — two
+   * subscribers declaring different output shapes for identical calldata are
+   * kept as separate wire calls, each decoding correctly against its own
+   * ABI, so dedup can never silently corrupt one decoder with another's
+   * shape.
+   *
+   * See `Presets.throughput` for a ready-made bundle that turns this on
+   * together with `maxConcurrentBatches`/`adaptiveBatching`.
+   */
+  dedupe?: boolean
 }
 
 /**
@@ -150,7 +177,7 @@ export async function runMultistepTasks<TResult>(
   // -> mark-consumed), see `src/core/internal.ts`. Only branded tasks
   // (`defineTask`/`buildErc20Task`/`buildErc4626Task` output) are affected —
   // legacy `MultistepTask`s pass through every step as a no-op.
-  const { batchSize, maxConcurrentBatches, adaptiveBatching, maxBatchAttempts } = prepareRun(ts, options)
+  const { batchSize, maxConcurrentBatches, adaptiveBatching, maxBatchAttempts, dedupe } = prepareRun(ts, options)
   await resolvePinnedBlock()
 
   // `run`'s fail-fast policy (F6a/F6b) — see `src/core/engine.ts`'s doc
@@ -186,7 +213,7 @@ export async function runMultistepTasks<TResult>(
     },
   }
 
-  await runSteps(ts, { batchSize, maxConcurrentBatches, adaptiveBatching, maxBatchAttempts }, policy)
+  await runSteps(ts, { batchSize, maxConcurrentBatches, adaptiveBatching, maxBatchAttempts, dedupe }, policy)
 
   return ts.map((task) => task.finalize())
 }

@@ -19,10 +19,51 @@
  * pipeline (`prepareRun`/`resolvePinnedBlock`, `internal.ts`) and the final
  * `finalize()` pass — both runners diverge sharply there (throw vs settle
  * per task) and gain nothing from sharing.
+ *
+ * ## Within-step, cross-task dedup (F7)
+ *
+ * Added after call collection, strictly PRE-bisection: the wire list handed
+ * to `runBatchPool` (batching/bisection, `src/core/pool.ts`) is the DEDUPED
+ * list, never the raw per-task call list. `src/core/dedupe.ts` owns the key
+ * computation (`dedupeKeyFor`) — this module owns the grouping and, on the
+ * way back, the result FAN-OUT.
+ *
+ * **Data structure:** `mapping` used to be one `{ taskIndex, key }` entry
+ * per WIRE call (1:1, T14-era). It is now one `{ subscribers: { taskIndex,
+ * key }[] }` entry per wire call — a 1:N "who receives this wire call's
+ * result" list. With `options.dedupe` off (default), every entry's
+ * `subscribers` array has exactly one element and the shape degrades to the
+ * old 1:1 behavior byte-for-byte (same iteration count, same routing). With
+ * it on, a merged group's entry carries one subscriber per (taskIndex, key)
+ * that asked for that exact call — every call whose computed key already
+ * has a group gets appended to that entry's `subscribers` list INSTEAD of
+ * contributing its own slot to the wire list; a call that is ineligible, or
+ * whose key computation itself failed (`dedupeKeyFor` returns `undefined`
+ * either way — see its doc comment), always gets its own singleton entry,
+ * exactly like the "off" case.
+ *
+ * **Wire-list order:** built by iterating tasks/calls in their original
+ * collection order and pushing a NEW wire entry only the first time a given
+ * key (or an ineligible/unkeyed call) is seen — so the wire list is "first
+ * representative of each group + every ineligible call, in original
+ * relative order of first occurrence", per spec. Batching/bisection then
+ * operate on exactly that list, with no awareness dedup ever happened.
+ *
+ * **Fan-out on the way back:** after the pool settles, each wire call's
+ * ONE `RawResult` (success or failure — a bisection-terminal synthesized
+ * failure from `recordTerminal` is just another `RawResult` by the time it
+ * reaches this routing loop, indistinguishable from an ordinary one) is
+ * routed to EVERY subscriber in that entry's list, not just one — so a
+ * merged group's failure (transport-terminal via bisection, or a plain
+ * per-call revert) reaches every task that asked for it, and a success
+ * reaches all of them too. Perf: `dedupeKeyFor` is only ever called when
+ * `options.dedupe` is true (see the call-collection loop below) — the
+ * default path never computes a key at all.
  */
 
 import type { MultistepTask, StepCall, StepResult, RawResult } from './types'
 import { runBatchPool } from './pool'
+import { dedupeKeyFor } from './dedupe'
 
 /**
  * The hooks that fully capture `run` vs `runSettled`'s divergence — 3 as of
@@ -91,6 +132,18 @@ export interface StepEngineOptions {
    *  when `adaptiveBatching` is true; otherwise any rejection is terminal
    *  on its first occurrence regardless of this value (T14 behavior). */
   maxBatchAttempts: number
+  /** F7 — see `BatchOptions.dedupe`. Gates whether this step's call
+   *  collection groups eligible calls before building the wire list — see
+   *  the module doc's "Within-step, cross-task dedup" section. `false`
+   *  (default) never calls `dedupeKeyFor` at all. */
+  dedupe: boolean
+}
+
+/** One wire-list entry's "who receives this call's result" list — see the
+ *  module doc's "Data structure" section. Exactly one element unless F7
+ *  dedup actually merged two or more subscribers into this entry. */
+interface WireMappingEntry {
+  subscribers: { taskIndex: number; key: string }[]
 }
 
 /**
@@ -111,14 +164,45 @@ export async function runSteps<TResult>(
 
   for (let step = 1; step <= maxStep; step++) {
     const calls: StepCall[] = []
-    const mapping: { taskIndex: number; key: string }[] = []
+    const mapping: WireMappingEntry[] = []
+
+    // F7 dedup: only allocated (and only ever consulted) when the option is
+    // on — dedup key string -> index of that group's entry in `mapping`/
+    // `calls`. Left `undefined` on the default path, which is what makes
+    // `dedupeKeyFor` provably never run below (see the module doc's "Perf"
+    // note).
+    const groupIndexByKey = options.dedupe ? new Map<string, number>() : undefined
 
     for (let taskIndex = 0; taskIndex < ts.length; taskIndex++) {
       const stepCalls = policy.buildStepCalls(taskIndex, step)
       if (stepCalls === undefined) continue
       for (const call of stepCalls) {
+        const subscriber = { taskIndex, key: call.key }
+
+        // `dedupeKeyFor` returns `undefined` for BOTH reasons a call must
+        // never be merged (ineligible, or keying itself failed) — either
+        // way it falls straight through to the "own wire entry" branch
+        // below, identically to the dedup-off path.
+        const dedupeKey = groupIndexByKey ? dedupeKeyFor(call) : undefined
+
+        if (dedupeKey !== undefined) {
+          const existingIndex = groupIndexByKey!.get(dedupeKey)
+          if (existingIndex !== undefined) {
+            // Already have a representative wire call for this key — this
+            // call contributes no new wire-list entry, just another
+            // subscriber to the existing one.
+            mapping[existingIndex]!.subscribers.push(subscriber)
+            continue
+          }
+          // First call seen for this key — it becomes the group's
+          // representative. Record its (about-to-be-pushed) index BEFORE
+          // pushing, so it equals `calls.length` at the moment of the push
+          // below.
+          groupIndexByKey!.set(dedupeKey, calls.length)
+        }
+
         calls.push(call)
-        mapping.push({ taskIndex, key: call.key })
+        mapping.push({ subscribers: [subscriber] })
       }
     }
 
@@ -155,21 +239,30 @@ export async function runSteps<TResult>(
           const mappingEntry = mapping[globalIndex]
           globalIndex++
           if (!mappingEntry) continue
-          const { taskIndex, key } = mappingEntry
           const result = batchResults[i] as RawResult
 
-          const list = perTaskResults[taskIndex]!
-          if (result.status === 'success') {
-            list.push({ status: 'success', key, value: result.value })
-          } else {
-            // Forward the SAME error object — never wrap or discard it.
-            // exactOptionalPropertyTypes-safe: only include `error` when the
-            // RawResult actually carried one.
-            list.push({
-              status: 'failure',
-              key,
-              ...('error' in result && result.error !== undefined ? { error: result.error } : {}),
-            })
+          // F7 fan-out: route this ONE wire result to EVERY subscriber —
+          // success and failure alike, and regardless of whether the
+          // failure came from an ordinary per-call revert or a bisection
+          // TERMINAL synthesis (`recordTerminal`, `src/core/pool.ts`): by
+          // the time it's a `RawResult` here, both are indistinguishable,
+          // so every subscriber of a merged group sees the same outcome. A
+          // non-merged call's entry has exactly one subscriber, so this
+          // degrades to the pre-F7 single-route behavior identically.
+          for (const { taskIndex, key } of mappingEntry.subscribers) {
+            const list = perTaskResults[taskIndex]!
+            if (result.status === 'success') {
+              list.push({ status: 'success', key, value: result.value })
+            } else {
+              // Forward the SAME error object — never wrap or discard it.
+              // exactOptionalPropertyTypes-safe: only include `error` when
+              // the RawResult actually carried one.
+              list.push({
+                status: 'failure',
+                key,
+                ...('error' in result && result.error !== undefined ? { error: result.error } : {}),
+              })
+            }
           }
         }
       }

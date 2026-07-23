@@ -63,24 +63,41 @@ export interface SingleUseCarrier {
  *  vice versa. */
 const consumed = new WeakSet<object>()
 
+/**
+ * Internal marker stamped on every compiled `StepCall` by `defineTask()`'s
+ * `buildStepCalls` (F7 — relocated here from `defineTask.ts` so the engine
+ * can read it without a cross-layer import back into the task-builder
+ * module). `true` unless the originating `TypedCallSpec` had `dedupe:
+ * false`; a hand-authored legacy `StepCall` never carries this symbol at
+ * all, so `call[DEDUPE_ELIGIBLE] === true` is the one true "is this call
+ * eligible for within-step dedup" check — see `src/core/dedupe.ts`.
+ *
+ * Deliberately NOT exported from `src/index.ts` (not even for tests):
+ * presence/value are verified via `Object.getOwnPropertySymbols` +
+ * `Symbol.description`, exactly as `SINGLE_USE` above.
+ */
+export const DEDUPE_ELIGIBLE: unique symbol = Symbol('domino.dedupeEligible')
+
 /** TS-only convenience for the brand-check casts below — erased at compile
  *  time, so using it at 3 call sites (instead of a real `isBranded()`
  *  function) costs zero extra runtime bytes over one. */
 type Branded<T> = MultistepTask<T> & SingleUseCarrier
 
 /**
- * Numeric (+ one boolean) options validated + defaulted by `validateOptions`
- * (F6a/F6b). All four ride through `prepareRun`'s return value.
+ * Numeric (+ two boolean) options validated + defaulted by `validateOptions`
+ * (F6a/F6b/F7). All five ride through `prepareRun`'s return value.
  * `maxBatchAttempts` and `adaptiveBatching` are both consumed by the engine
  * (`src/core/engine.ts`/`src/core/pool.ts`, F6b) — `adaptiveBatching` gates
  * whether bisection ever runs at all; `maxBatchAttempts` bounds it once it
- * does.
+ * does. `dedupe` (F7) gates the engine's within-step, cross-task call
+ * dedup — see `src/core/dedupe.ts`.
  */
 export interface ValidatedRunOptions {
   batchSize: number
   maxConcurrentBatches: number
   maxBatchAttempts: number
   adaptiveBatching: boolean
+  dedupe: boolean
 }
 
 /** Options `validateOptions` reads — a structural subset of `BatchOptions`. */
@@ -89,6 +106,7 @@ export interface NumericOptionsInput {
   maxConcurrentBatches?: number
   maxBatchAttempts?: number
   adaptiveBatching?: boolean
+  dedupe?: boolean
 }
 
 /**
@@ -134,7 +152,12 @@ export function validateOptions(o: NumericOptionsInput | undefined): ValidatedRu
   // caller has opted in with knowledge of their transport's failure modes).
   const adaptiveBatching = o?.adaptiveBatching ?? false
 
-  return { batchSize, maxConcurrentBatches, maxBatchAttempts, adaptiveBatching }
+  // Plain boolean flag (F7), default `false` — see `BatchOptions.dedupe`'s
+  // doc comment. Off by default so dedup key computation never runs on the
+  // hot path unless a caller opts in (`Presets.throughput` does).
+  const dedupe = o?.dedupe ?? false
+
+  return { batchSize, maxConcurrentBatches, maxBatchAttempts, adaptiveBatching, dedupe }
 }
 
 /**
