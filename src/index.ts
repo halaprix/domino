@@ -17,6 +17,13 @@ export type { BatchOptions } from './core/runMultistepTasks'
 export { runSettled } from './core/runSettled'
 export type { TaskDiagnostics, SettledTaskResult } from './core/runSettled'
 
+// Ref-graph task builder (F2) + typed call specs (F1)
+// Note: `DIAGNOSTICS` (runSettled.ts) is intentionally NOT exported here —
+// it's an internal channel between defineTask and runSettled, not public API.
+export { defineTask } from './core/defineTask'
+export type { TaskBuilder, TypedCallSpec } from './core/defineTask'
+export type { Ref, WithRefs, ResolveRefs } from './core/refs'
+
 // Error taxonomy
 export { DominoCallError } from './core/errors'
 export type { DominoCallErrorKind, DominoCallErrorOptions } from './core/errors'
