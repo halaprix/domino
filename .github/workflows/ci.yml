@@ -31,6 +31,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Snippet checks
+        run: npm run check:snippets
+
       - name: Test
         run: npm test
 
