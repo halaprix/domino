@@ -62,6 +62,19 @@
  *   after:  43,268 bytes (42.25KB)  gzip 10,502 bytes (10.26KB)
  *   delta:  +1,363 bytes raw (+1.33KB)  +426 bytes gzip (+0.42KB)
  *
+ * 1.1 (F3 human-readable ABI, T10): budget raised again, 43KB → **43.1KB** raw,
+ * expected cost ~0.5KB, actual cost ~0.08KB (well within budget). Adds
+ * `parseAbiMemoized()` in `src/core/abi.ts` (WeakMap identity cache +
+ * string-key LRU cache, capacity 256) for deduplicating parsed ABIs across
+ * both array-identity and value-equality boundaries. Integrates
+ * `NormalizedAbi<abi>` type helper into `TaskBuilder.call` overloads and
+ * `TypedCallSpec` to accept both `Abi` and `readonly string[]` forms at
+ * build time, normalizing to parsed `Abi` at runtime before storing on the
+ * node. Measured delta:
+ *   before: 43,268 bytes (42.25KB)  gzip 10,502 bytes (10.26KB)
+ *   after:  44,115 bytes (43.08KB)  gzip 10,761 bytes (10.51KB)
+ *   delta:  +847 bytes raw (+0.83KB)  +259 bytes gzip (+0.25KB)
+ *
  * 1.1 (F2 single-use guard, T9 — external review round): two P2/P1 fixes on
  * top of the above, same 43KB ceiling (net bundle effect negligible):
  * (P1) both `runMultistepTasks` and `runSettled` now snapshot their `tasks`
@@ -89,14 +102,15 @@ function bundleSize(name: string): number {
 }
 
 describe('bundle size', () => {
-  it('main index bundle is under 43KB (core + handlers + viem utils + bytecodes + defineTask + hardening + single-use guard)', () => {
+  it('main index bundle is under 43.1KB (core + handlers + viem utils + bytecodes + defineTask + hardening + single-use guard + F3 human-readable ABI)', () => {
     const size = bundleSize('index.js')
     // v2 bundles viem ABI utils (~3KB) + bytecodes (~8KB) + core/handlers (~19KB);
     // 1.1 (F5) adds runSettled (~1KB); 1.1 (F2) adds defineTask (~4.4KB);
     // 1.1 (F2 hardening round) adds ~1KB more; 1.1 (F2 single-use guard, T9)
-    // adds ~1.3KB more (full diagnostics messages, not shortened for bytes)
+    // adds ~1.3KB more (full diagnostics messages, not shortened for bytes);
+    // 1.1 (F3) adds parseAbiMemoized + type integration (~0.8KB)
     // — see the module doc comment above for the full measured delta.
-    expect(size).toBeLessThan(43 * 1024)
+    expect(size).toBeLessThan(43.1 * 1024)
   })
 
   it('no engine subpaths exist (removed in v2)', () => {
