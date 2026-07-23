@@ -38,7 +38,7 @@
  * so future code should prefer descriptive names.
  */
 
-import type { MultistepTask } from './types'
+import type { MultistepTask, StepExecutor, BlockParam, PinnedBlock } from './types'
 import { DominoTaskReuseError } from './errors'
 
 /**
@@ -107,6 +107,19 @@ export interface NumericOptionsInput {
   maxBatchAttempts?: number
   adaptiveBatching?: boolean
   dedupe?: boolean
+}
+
+/**
+ * Options `validatePinCapability`/`resolvePinnedBlock` read (F8) — a
+ * structural subset of `BatchOptions`. Declared here rather than imported
+ * from `runMultistepTasks.ts` for the same reason `NumericOptionsInput` is:
+ * `runMultistepTasks.ts` already imports FROM this module, so importing
+ * `BatchOptions` back would be circular.
+ */
+export interface PinOptionsInput {
+  pinBlock?: boolean
+  block?: BlockParam
+  onPin?: (block: PinnedBlock) => void
 }
 
 /**
@@ -195,16 +208,50 @@ export function rejectDuplicateInstances<T>(ts: MultistepTask<T>[]): void {
 }
 
 /**
- * Pipeline step 3 — named no-op seam. F8/T17 (pinBlock capability) fills
- * this in: it will check whether the executor supports the block-pinning
- * capability the run requires and throw if not. Must run — and, once
- * implemented, must throw — BEFORE `markTasksConsumed`: a capability
- * rejection must never leave the rejected submission's tasks consumed.
- * Takes no arguments today; F8/T17 adds whatever it needs (tasks/options)
- * when it fills this in.
+ * Pipeline step 3 (F8) — checks whether this run's block-pinning request is
+ * satisfiable, and throws before anything is consumed if not. A no-op
+ * whenever `pinBlock` isn't set (the overwhelmingly common case — this
+ * function never even looks at `executor` or `block` then).
+ *
+ * Runs BEFORE `markTasksConsumed`: a capability rejection must never leave
+ * the rejected submission's tasks consumed — this is exactly the ordering
+ * `prepareRun` already documents, now filled in.
+ *
+ * Two checks, both spec-literal:
+ *
+ * (a) **Capability**: `pinBlock: true` against an executor that doesn't
+ *     implement `getBlockNumber` throws — ALWAYS, even when the caller's
+ *     `block` is an explicit `blockNumber`/`blockHash` that would never
+ *     actually need to CALL `getBlockNumber` (see `resolvePinnedBlock`
+ *     below). This is deliberate: `pinBlock` is a predictable capability
+ *     contract on the executor, not a "throw only if we happen to need the
+ *     RPC this time" heuristic — a caller who later switches their `block`
+ *     to a tag shouldn't have that switch silently start throwing on an
+ *     executor they'd already been using with `pinBlock: true`.
+ * (b) **Tag support**: `block: { blockTag: 'pending' }` throws — `pending`
+ *     has no stable block number, so pinning it is a contradiction in
+ *     terms, not something resolvable by picking a number. Every other,
+ *     STABLE tag (`latest`/`earliest`/`safe`/`finalized`), an explicit
+ *     `blockNumber`, an explicit `blockHash`, and an absent `block`
+ *     (implicit `'latest'`) are all fine here — `resolvePinnedBlock` is
+ *     what actually branches on which.
  */
-export function validatePinCapability(): void {
-  // Intentionally empty until F8/T17.
+export function validatePinCapability(options: PinOptionsInput | undefined, executor: StepExecutor): void {
+  if (!options?.pinBlock) return
+
+  if (typeof executor.getBlockNumber !== 'function') {
+    throw new Error(
+      'pinBlock: true requires a StepExecutor implementing getBlockNumber(block?) — this executor ' +
+        'does not support block pinning (Eip1193Executor implements it; a custom StepExecutor must ' +
+        'add it to opt in)',
+    )
+  }
+
+  if (options.block && 'blockTag' in options.block && options.block.blockTag === 'pending') {
+    throw new Error(
+      "pinBlock: true does not support blockTag 'pending' — pending has no stable block number",
+    )
+  }
 }
 
 /**
@@ -233,16 +280,76 @@ export function markTasksConsumed<T>(ts: MultistepTask<T>[]): void {
 }
 
 /**
- * Pipeline step 5 — named async no-op seam. F8/T17 (pinBlock resolution)
- * fills this in with an `await getBlockNumber()`-style call. Deliberately
- * runs AFTER `markTasksConsumed`: a failure here means execution has already
- * begun (calls are about to be dispatched), so by design the tasks are left
- * consumed — the same rule `executeSteps` itself already follows for any
- * later failure. Takes no arguments today; F8/T17 adds whatever it needs
- * (tasks/options) when it fills this in with an `await getBlockNumber()`.
+ * Pipeline step 5 (F8) — resolves the ONE effective block every step of this
+ * run will use, and (when `pinBlock` is set) synchronously reports it via
+ * `onPin`. Deliberately runs AFTER `markTasksConsumed`: a failure here means
+ * execution has already begun (calls are about to be dispatched), so by
+ * design the tasks are left consumed — the same rule the step loop itself
+ * already follows for any later failure (see the executor-rejection-after-
+ * consumption test in `singleUse.test.ts`).
+ *
+ * `pinBlock` false/absent (the default): a pure no-op — returns
+ * `options?.block` completely untouched, so callers see byte-identical
+ * behavior to every pre-F8 release (including "block omitted" staying
+ * `undefined`, never defaulted here).
+ *
+ * `pinBlock: true` — by this point `validatePinCapability` has already
+ * guaranteed `executor.getBlockNumber` exists and `block.blockTag` isn't
+ * `'pending'`:
+ *   - `block` absent, or carrying any STABLE `blockTag`
+ *     (`'latest' | 'earliest' | 'safe' | 'finalized'` — anything but
+ *     `'pending'`, already rejected by `validatePinCapability`):
+ *     `await executor.getBlockNumber(block)` (the ONE extra round-trip
+ *     pinning costs) resolves a concrete number; the effective block for
+ *     every step becomes `{ blockNumber: resolved }`, and that's also the
+ *     `PinnedBlock` reported to `onPin`.
+ *   - explicit `{ blockNumber }`: no RPC — used as-is, reported as-is.
+ *   - explicit `{ blockHash, requireCanonical? }`: no RPC — used as-is
+ *     (`requireCanonical` untouched), reported as
+ *     `{ blockHash, requireCanonical }` with the key omitted entirely when
+ *     the caller didn't supply it (`exactOptionalPropertyTypes`-safe: an
+ *     omitted key must be genuinely absent, not present-with-`undefined`).
+ *
+ * `onPin`, when provided, is called exactly once, SYNCHRONOUSLY (a direct
+ * call, no microtask hop introduced here beyond whatever `await
+ * getBlockNumber()` already caused) — and only ever reached when
+ * `pinBlock` is true; a caller who passes `onPin` without `pinBlock` gets it
+ * silently never invoked (see `BatchOptions.onPin`'s doc comment). If it
+ * throws, that throw is this function's rejection: the caller (`run`/
+ * `runSettled`) sees it as `resolvePinnedBlock`'s own failure, tasks stay
+ * consumed (already marked, above), and — because this function is always
+ * `await`ed strictly before the step loop starts — no `executeMulticall`
+ * call has been dispatched yet.
  */
-export async function resolvePinnedBlock(): Promise<void> {
-  // Intentionally empty until F8/T17.
+export async function resolvePinnedBlock(
+  options: PinOptionsInput | undefined,
+  executor: StepExecutor,
+): Promise<BlockParam | undefined> {
+  if (!options?.pinBlock) return options?.block
+
+  const requested = options.block
+  let effectiveBlock: BlockParam
+  let pinned: PinnedBlock
+
+  if (requested && 'blockNumber' in requested) {
+    effectiveBlock = requested
+    pinned = { blockNumber: requested.blockNumber }
+  } else if (requested && 'blockHash' in requested) {
+    effectiveBlock = requested
+    pinned =
+      requested.requireCanonical !== undefined
+        ? { blockHash: requested.blockHash, requireCanonical: requested.requireCanonical }
+        : { blockHash: requested.blockHash }
+  } else {
+    // Absent, or an explicit blockTag — 'pending' is already impossible here
+    // (validatePinCapability rejected it pre-consumption).
+    const resolved = await executor.getBlockNumber!(requested)
+    effectiveBlock = { blockNumber: resolved }
+    pinned = { blockNumber: resolved }
+  }
+
+  options.onPin?.(pinned)
+  return effectiveBlock
 }
 
 /**
@@ -251,15 +358,23 @@ export async function resolvePinnedBlock(): Promise<void> {
  * mark branded tasks consumed. Returns the validated options bundle so each
  * runner can drop this straight in place of its old inline validation.
  *
+ * Takes `executor` (F8) purely to hand it to `validatePinCapability` — this
+ * function still runs entirely synchronously (the capability check is sync;
+ * only `resolvePinnedBlock`, next, needs `await`).
+ *
  * Deliberately stops here (not shared with `resolvePinnedBlock`/the step
  * loop): `run()`/`runSettled()` diverge in failure handling once execution
  * actually starts, so those stay in each runner's own body (see
  * `src/core/engine.ts`'s `runSteps` for the part that IS now shared).
  */
-export function prepareRun<T>(ts: MultistepTask<T>[], o: NumericOptionsInput | undefined): ValidatedRunOptions {
+export function prepareRun<T>(
+  ts: MultistepTask<T>[],
+  o: (NumericOptionsInput & PinOptionsInput) | undefined,
+  executor: StepExecutor,
+): ValidatedRunOptions {
   const validated = validateOptions(o)
   rejectDuplicateInstances(ts)
-  validatePinCapability()
+  validatePinCapability(o, executor)
   markTasksConsumed(ts)
   return validated
 }

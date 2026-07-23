@@ -15,9 +15,8 @@
  * await resolver.run(tasks, { ...Presets.throughput, batchSize: 200 })
  * ```
  *
- * (A future `pinBlock` capability will compose the same way once it ships —
- * `{ ...Presets.throughput, pinBlock: true }` — but that option does not
- * exist yet as of this release.)
+ * `pinBlock` (F8) composes the same way — spread the preset, then add it:
+ * `{ ...Presets.throughput, pinBlock: true }`.
  *
  * `dedupe: true` here can never change legacy-task semantics: dedup only
  * ever merges calls stamped dedup-ELIGIBLE (a compiled `TypedCallSpec` call,

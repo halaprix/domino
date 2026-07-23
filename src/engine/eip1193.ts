@@ -62,6 +62,42 @@ export class Eip1193Executor implements StepExecutor {
   }
 
   /**
+   * Resolve a `BlockParam` to a concrete block number (F8, `pinBlock`'s
+   * capability method — see `StepExecutor.getBlockNumber`'s doc comment).
+   *
+   * - `block` absent, or `{ blockTag }` — one `eth_getBlockByNumber` request
+   *   (tag defaults to `'latest'` when `block` is absent), returning the
+   *   block's `number` field parsed from hex to `bigint`.
+   * - explicit `{ blockNumber }` — returned as-is, no RPC.
+   * - `{ blockHash, ... }` — NOT resolved by this method (deliberately
+   *   minimal: domino's own `pinBlock` pipeline never calls this for a
+   *   blockHash block — an explicit hash needs no resolution to begin with,
+   *   see `resolvePinnedBlock` in `src/core/internal.ts`). A direct caller
+   *   invoking this method with a blockHash block gets a clear, immediate
+   *   rejection instead of a silently wrong/absent block number.
+   */
+  async getBlockNumber(block?: BlockParam): Promise<bigint> {
+    if (block && 'blockHash' in block) {
+      throw new Error('getBlockNumber does not resolve block hashes')
+    }
+    if (block && 'blockNumber' in block) {
+      return block.blockNumber
+    }
+
+    const tag = block && 'blockTag' in block ? block.blockTag : 'latest'
+    const result = (await this.#provider.request({
+      method: 'eth_getBlockByNumber',
+      params: [tag, false],
+    })) as { number: `0x${string}` | null } | null
+
+    const numberHex = result?.number
+    if (numberHex == null) {
+      throw new Error(`getBlockNumber: no block found for tag "${tag}"`)
+    }
+    return BigInt(numberHex)
+  }
+
+  /**
    * Execute one batch of calls.
    */
   async executeMulticall(
