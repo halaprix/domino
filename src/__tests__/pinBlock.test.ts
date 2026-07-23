@@ -272,6 +272,102 @@ describe('F8 pinBlock — validatePinCapability (pre-consumption)', () => {
   })
 })
 
+// ─── Empty-tasks ordering (external review, P2) ───
+//
+// `runMultistepTasks`'s empty-tasks shortcut historically ran BEFORE the F2
+// pipeline entirely (a 1.0-pinned quirk: an invalid `batchSize` with zero
+// tasks silently resolves to `[]`). That shortcut used to also skip F8's own
+// seams outright — meaning `onPin` never fired for a zero-task `pinBlock:
+// true` run. `runSettled` had the opposite bug: it always ran `prepareRun`
+// (and so `validatePinCapability`) for an empty submission, but returned `[]`
+// BEFORE ever reaching `resolvePinnedBlock`, so `onPin` never fired there
+// either. Both are fixed: `onPin`'s contract ("exactly once per run whenever
+// `pinBlock: true`") now holds for zero-task runs in both runners, while the
+// legacy `batchSize`-with-zero-tasks quirk stays intact for `run()`.
+
+describe('F8 pinBlock — empty-tasks ordering (external review, P2)', () => {
+  it('run(): empty tasks + pinBlock + onPin -> onPin fires once with the resolved PinnedBlock; zero executeMulticall', async () => {
+    const executor = makeExecutor({ getBlockNumber: async () => 777n })
+    const pins: PinnedBlock[] = []
+
+    const result = await runMultistepTasks(executor, [], { pinBlock: true, onPin: (b) => pins.push(b) })
+
+    expect(result).toEqual([])
+    expect(executor.getBlockNumber).toHaveBeenCalledTimes(1)
+    expect(pins).toEqual([{ blockNumber: 777n }])
+    expect(executor.invocations).toHaveLength(0)
+  })
+
+  it('runSettled(): empty tasks + pinBlock + onPin -> onPin fires once with the resolved PinnedBlock; zero executeMulticall', async () => {
+    const executor = makeExecutor({ getBlockNumber: async () => 888n })
+    const pins: PinnedBlock[] = []
+
+    const result = await runSettled(executor, [], { pinBlock: true, onPin: (b) => pins.push(b) })
+
+    expect(result).toEqual([])
+    expect(executor.getBlockNumber).toHaveBeenCalledTimes(1)
+    expect(pins).toEqual([{ blockNumber: 888n }])
+    expect(executor.invocations).toHaveLength(0)
+  })
+
+  it('run(): empty tasks + pinBlock + missing getBlockNumber capability -> throws', async () => {
+    const executor = makeExecutor() // no getBlockNumber at all
+    await expect(runMultistepTasks(executor, [], { pinBlock: true })).rejects.toThrow(/getBlockNumber/)
+    expect(executor.invocations).toHaveLength(0)
+  })
+
+  it('runSettled(): empty tasks + pinBlock + missing getBlockNumber capability -> throws', async () => {
+    const executor = makeExecutor()
+    await expect(runSettled(executor, [], { pinBlock: true })).rejects.toThrow(/getBlockNumber/)
+    expect(executor.invocations).toHaveLength(0)
+  })
+
+  it('run(): empty tasks + pinBlock: false + invalid batchSize -> still resolves [] (1.0-pinned legacy quirk, unaffected by F8)', async () => {
+    const executor = makeExecutor()
+    const result = await runMultistepTasks(executor, [], { batchSize: 0 })
+    expect(result).toEqual([])
+    expect(executor.invocations).toHaveLength(0)
+  })
+})
+
+// ─── getBlockNumber rejection: resolution stays strictly AFTER markTasksConsumed (external review, P2) ───
+
+describe('F8 pinBlock — getBlockNumber rejection leaves tasks consumed', () => {
+  it('run(): executor.getBlockNumber rejects -> run rejects with that error; zero executeMulticall; resubmission throws DominoTaskReuseError', async () => {
+    const boom = new Error('getBlockNumber transport failure')
+    const executor = makeExecutor({
+      getBlockNumber: async () => {
+        throw boom
+      },
+    })
+    const task = brandedTask()
+
+    await expect(runMultistepTasks(executor, [task], { pinBlock: true })).rejects.toBe(boom)
+    expect(executor.invocations).toHaveLength(0) // zero multicall dispatches
+
+    // Proves resolution ran AFTER markTasksConsumed: the task is already
+    // consumed, so a resubmission (even WITHOUT pinBlock, so getBlockNumber
+    // is never called again) sees the reuse error, not another transport
+    // failure.
+    await expect(runMultistepTasks(executor, [task])).rejects.toThrow(DominoTaskReuseError)
+  })
+
+  it('runSettled(): executor.getBlockNumber rejects -> whole call rejects with that error (not a settled rejection); zero executeMulticall; resubmission throws DominoTaskReuseError', async () => {
+    const boom = new Error('getBlockNumber transport failure (settled)')
+    const executor = makeExecutor({
+      getBlockNumber: async () => {
+        throw boom
+      },
+    })
+    const task = brandedTask()
+
+    await expect(runSettled(executor, [task], { pinBlock: true })).rejects.toBe(boom)
+    expect(executor.invocations).toHaveLength(0)
+
+    await expect(runSettled(executor, [task])).rejects.toThrow(DominoTaskReuseError)
+  })
+})
+
 // ─── 5/6. Explicit blockNumber / blockHash -> no-op, no RPC ───
 
 describe('F8 pinBlock — resolvePinnedBlock no-op paths (explicit blockNumber/blockHash)', () => {

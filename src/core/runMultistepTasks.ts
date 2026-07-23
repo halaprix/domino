@@ -14,7 +14,7 @@
  */
 
 import type { MultistepTask, StepCall, StepResult, StepExecutor, RawResult, BlockParam, PinnedBlock } from './types'
-import { prepareRun, resolvePinnedBlock } from './internal'
+import { prepareRun, resolvePinnedBlock, validatePinCapability } from './internal'
 import { runSteps, type StepEnginePolicy } from './engine'
 
 /**
@@ -98,11 +98,11 @@ export interface BatchOptions {
   /**
    * Block to query at (defaults to 'latest'). Same block PARAMETER used for
    * every step's `executeMulticall` call — but without `pinBlock: true`,
-   * that does not mean every step reads the same STATE: a tag like
-   * `'latest'`/`'safe'`/`'finalized'` is re-resolved by the node on every
-   * separate `eth_call`, so the chain can advance between steps. See
-   * `pinBlock` below (and the "Atomicity" section in `docs/api-reference.md`)
-   * to remove that gap.
+   * that does not mean every step reads the same STATE: a stable tag like
+   * `'latest'`/`'earliest'`/`'safe'`/`'finalized'` is re-resolved by the
+   * node on every separate `eth_call`, so the chain can advance between
+   * steps. See `pinBlock` below (and the "Atomicity" section in
+   * `docs/api-reference.md`) to remove that gap.
    */
   block?: BlockParam
 
@@ -114,7 +114,8 @@ export interface BatchOptions {
    *
    * Resolution (see `resolvePinnedBlock` in `src/core/internal.ts` for the
    * full contract):
-   * - `block` absent, or `{ blockTag: 'latest' | 'safe' | 'finalized' }` —
+   * - `block` absent, or carrying any STABLE `blockTag`
+   *   (`'latest' | 'earliest' | 'safe' | 'finalized'`) —
    *   resolved via `executor.getBlockNumber(block)` (one extra round-trip);
    *   every step then queries `{ blockNumber: <resolved> }`.
    * - `block: { blockTag: 'pending' }` — throws before any task is consumed.
@@ -211,7 +212,26 @@ export async function runMultistepTasks<TResult>(
   // 1.0 behavior (an invalid `batchSize` with zero tasks silently resolves
   // to `[]` rather than throwing) and must not change; see `runSettled`'s
   // deliberately different ordering (it validates first) for contrast.
-  if (tasks.length === 0) return []
+  //
+  // F8 ordering nuance (external review, P2): that 1.0 quirk is preserved
+  // EXACTLY — `validateOptions` (batchSize/etc.) still never runs for an
+  // empty submission, `pinBlock` or not. But `onPin`'s own contract is
+  // "invoked exactly once per run whenever `pinBlock: true`" — a run with
+  // zero tasks is still a run, and there is no task for that guarantee to
+  // hide behind. So when `pinBlock` is set, this shortcut does NOT bypass
+  // F8's two seams: it runs `validatePinCapability` (still vacuously
+  // "pre-consumption" — there is nothing to consume) and
+  // `resolvePinnedBlock` (which invokes `onPin`) before returning `[]`,
+  // with zero tasks ever touching `executeMulticall`. `pinBlock: false`
+  // (the default) takes neither branch below and is byte-identical to
+  // every pre-F8 release.
+  if (tasks.length === 0) {
+    if (options?.pinBlock) {
+      validatePinCapability(options, executor)
+      await resolvePinnedBlock(options, executor)
+    }
+    return []
+  }
 
   // TOCTOU fix (external review, P1): snapshot the caller-owned array BEFORE
   // the consumption pipeline runs, and read ONLY this snapshot (`ts`) for

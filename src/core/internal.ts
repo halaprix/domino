@@ -230,10 +230,11 @@ export function rejectDuplicateInstances<T>(ts: MultistepTask<T>[]): void {
  *     executor they'd already been using with `pinBlock: true`.
  * (b) **Tag support**: `block: { blockTag: 'pending' }` throws — `pending`
  *     has no stable block number, so pinning it is a contradiction in
- *     terms, not something resolvable by picking a number. Every other tag
- *     (`latest`/`safe`/`finalized`), an explicit `blockNumber`, an explicit
- *     `blockHash`, and an absent `block` (implicit `'latest'`) are all fine
- *     here — `resolvePinnedBlock` is what actually branches on which.
+ *     terms, not something resolvable by picking a number. Every other,
+ *     STABLE tag (`latest`/`earliest`/`safe`/`finalized`), an explicit
+ *     `blockNumber`, an explicit `blockHash`, and an absent `block`
+ *     (implicit `'latest'`) are all fine here — `resolvePinnedBlock` is
+ *     what actually branches on which.
  */
 export function validatePinCapability(options: PinOptionsInput | undefined, executor: StepExecutor): void {
   if (!options?.pinBlock) return
@@ -295,7 +296,9 @@ export function markTasksConsumed<T>(ts: MultistepTask<T>[]): void {
  * `pinBlock: true` — by this point `validatePinCapability` has already
  * guaranteed `executor.getBlockNumber` exists and `block.blockTag` isn't
  * `'pending'`:
- *   - `block` absent, or `{ blockTag: 'latest' | 'safe' | 'finalized' }`:
+ *   - `block` absent, or carrying any STABLE `blockTag`
+ *     (`'latest' | 'earliest' | 'safe' | 'finalized'` — anything but
+ *     `'pending'`, already rejected by `validatePinCapability`):
  *     `await executor.getBlockNumber(block)` (the ONE extra round-trip
  *     pinning costs) resolves a concrete number; the effective block for
  *     every step becomes `{ blockNumber: resolved }`, and that's also the

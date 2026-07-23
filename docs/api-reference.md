@@ -47,7 +47,7 @@ Set `pinBlock: true` to remove that gap. The run resolves ONE concrete block at 
 
 | `block` input | Resolved to | Extra RPC |
 |---|---|---|
-| absent, or `{ blockTag: 'latest' \| 'safe' \| 'finalized' }` | `executor.getBlockNumber(block)` → `{ blockNumber }`, used for every step | +1 round-trip |
+| absent, or any stable tag (`{ blockTag: 'latest' \| 'earliest' \| 'safe' \| 'finalized' }`) | `executor.getBlockNumber(block)` → `{ blockNumber }`, used for every step | +1 round-trip |
 | `{ blockTag: 'pending' }` | throws — `pending` has no stable block number | — |
 | `{ blockNumber }` | used as-is | none |
 | `{ blockHash, requireCanonical? }` | used as-is, `requireCanonical` untouched | none |
@@ -500,7 +500,7 @@ Import the following directly from `@halaprix/domino` (this list is exhaustive �
 **Eip1193Executor class:**
 - `constructor(provider: Eip1193Provider)`
 - `executeMulticall(calls: StepCall[], block?: BlockParam): Promise<RawResult[]>`
-- `getBlockNumber(block?: BlockParam): Promise<bigint>` — resolves a `BlockParam` to a concrete block number; used by `pinBlock` (see [Atomicity](#atomicity))
+- `getBlockNumber(block?: BlockParam): Promise<bigint>` — resolves a `BlockParam` to a concrete block number. Exact contract: `block` absent or carrying a `blockTag` resolves via one `eth_getBlockByNumber` round-trip; an explicit `blockNumber` is returned as-is with no RPC at all; a `blockHash` block is rejected (throws `"getBlockNumber does not resolve block hashes"` — domino's own `pinBlock` pipeline never calls it that way, since an explicit hash needs no resolution to begin with). Used by `pinBlock` (see [Atomicity](#atomicity))
 - `refreshChainId(): Promise<number>`
 
 **`MulticallResolver<TAddr extends string = Address>` class** (implements `ResolverEngine<TAddr>`; signatures below use the default `TAddr = Address`):

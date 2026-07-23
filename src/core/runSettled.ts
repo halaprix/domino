@@ -162,14 +162,24 @@ export async function runSettled<TResult>(
     executor,
   )
 
-  if (ts.length === 0) return []
-
   // F8: the ONE effective block every step's executeMulticall uses — either
   // `options?.block` untouched (pinBlock off/absent, the default) or the
   // resolved pin (see `resolvePinnedBlock`'s doc comment in
   // `src/core/internal.ts`). Replaces the direct `options?.block` reads
   // below.
+  //
+  // F8 ordering nuance (external review, P2): called BEFORE the
+  // empty-tasks check below — `prepareRun` above already runs
+  // unconditionally regardless of `ts.length` (see its own comment), so
+  // `validatePinCapability` has already gated a bad `pinBlock` request
+  // either way; the only fix needed here is to not shortcut `resolvePinnedBlock`
+  // (and therefore `onPin`) away for an empty submission. `onPin`'s contract
+  // is "exactly once per run whenever `pinBlock: true`" — a zero-task run is
+  // still a run. `pinBlock: false` (the default) makes this call a pure
+  // no-op regardless of `ts.length`, so ordering here is unobservable then.
   const effectiveBlock = await resolvePinnedBlock(options, executor)
+
+  if (ts.length === 0) return []
 
   // Dead-task bookkeeping: once true, no further buildStepCalls/consumeStepResults
   // calls happen for that task index, and finalize() is skipped entirely.
