@@ -13,8 +13,8 @@
  * (vs O(N) sequential calls for naive approach)
  */
 
-import type { MultistepTask, StepCall, StepResult, StepExecutor, RawResult, BlockParam } from './types'
-import { prepareRun, resolvePinnedBlock } from './internal'
+import type { MultistepTask, StepCall, StepResult, StepExecutor, RawResult, BlockParam, PinnedBlock } from './types'
+import { prepareRun, resolvePinnedBlock, validatePinCapability } from './internal'
 import { runSteps, type StepEnginePolicy } from './engine'
 
 /**
@@ -95,8 +95,60 @@ export interface BatchOptions {
    */
   adaptiveBatching?: boolean
 
-  /** Block to query at (defaults to 'latest'). Same block used for ALL steps. */
+  /**
+   * Block to query at (defaults to 'latest'). Same block PARAMETER used for
+   * every step's `executeMulticall` call — but without `pinBlock: true`,
+   * that does not mean every step reads the same STATE: a stable tag like
+   * `'latest'`/`'earliest'`/`'safe'`/`'finalized'` is re-resolved by the
+   * node on every separate `eth_call`, so the chain can advance between
+   * steps. See `pinBlock` below (and the "Atomicity" section in
+   * `docs/api-reference.md`) to remove that gap.
+   */
   block?: BlockParam
+
+  /**
+   * Enable block pinning (F8): resolve ONE concrete block at the very start
+   * of the run and reuse it for every step's `executeMulticall` call,
+   * closing the "chain advanced between steps" gap `block` alone leaves
+   * open (see its doc comment above). Default: `false`.
+   *
+   * Resolution (see `resolvePinnedBlock` in `src/core/internal.ts` for the
+   * full contract):
+   * - `block` absent, or carrying any STABLE `blockTag`
+   *   (`'latest' | 'earliest' | 'safe' | 'finalized'`) —
+   *   resolved via `executor.getBlockNumber(block)` (one extra round-trip);
+   *   every step then queries `{ blockNumber: <resolved> }`.
+   * - `block: { blockTag: 'pending' }` — throws before any task is consumed.
+   *   `pending` has no stable block number; pinning it is unsupported.
+   * - explicit `block: { blockNumber }` — no-op, no extra RPC: already a
+   *   single concrete block.
+   * - explicit `block: { blockHash, requireCanonical? }` — no-op, no extra
+   *   RPC, `requireCanonical` preserved untouched.
+   *
+   * Requires a `StepExecutor` implementing `getBlockNumber` — `true` against
+   * an executor that lacks it throws immediately (before anything is
+   * consumed), regardless of which `block` shape was passed (a predictable
+   * capability contract, not a "only if we happen to need the RPC" check).
+   * `Eip1193Executor` implements it; a custom `StepExecutor` opts in the
+   * same way.
+   */
+  pinBlock?: boolean
+
+  /**
+   * Synchronous callback reporting the block a `pinBlock: true` run resolved
+   * (F8) — invoked exactly once per run, with the resolved `PinnedBlock`.
+   * Mapping: a resolved tag or an explicit `blockNumber` reports
+   * `{ blockNumber }`; an explicit `blockHash` reports
+   * `{ blockHash, requireCanonical }` (no extra RPC is ever made just to
+   * learn its number). **Only invoked when `pinBlock` is `true`** — supplying
+   * `onPin` without `pinBlock` is accepted but it is simply never called.
+   *
+   * If `onPin` throws, the run rejects with that error: tasks are already
+   * marked consumed by this point (block resolution happens after the
+   * consumption pipeline — see `src/core/internal.ts`), and no multicall
+   * batch has been dispatched yet.
+   */
+  onPin?: (block: PinnedBlock) => void
 
   /**
    * Enable within-step, cross-task call dedup (F7): before the wire list for
@@ -160,7 +212,26 @@ export async function runMultistepTasks<TResult>(
   // 1.0 behavior (an invalid `batchSize` with zero tasks silently resolves
   // to `[]` rather than throwing) and must not change; see `runSettled`'s
   // deliberately different ordering (it validates first) for contrast.
-  if (tasks.length === 0) return []
+  //
+  // F8 ordering nuance (external review, P2): that 1.0 quirk is preserved
+  // EXACTLY — `validateOptions` (batchSize/etc.) still never runs for an
+  // empty submission, `pinBlock` or not. But `onPin`'s own contract is
+  // "invoked exactly once per run whenever `pinBlock: true`" — a run with
+  // zero tasks is still a run, and there is no task for that guarantee to
+  // hide behind. So when `pinBlock` is set, this shortcut does NOT bypass
+  // F8's two seams: it runs `validatePinCapability` (still vacuously
+  // "pre-consumption" — there is nothing to consume) and
+  // `resolvePinnedBlock` (which invokes `onPin`) before returning `[]`,
+  // with zero tasks ever touching `executeMulticall`. `pinBlock: false`
+  // (the default) takes neither branch below and is byte-identical to
+  // every pre-F8 release.
+  if (tasks.length === 0) {
+    if (options?.pinBlock) {
+      validatePinCapability(options, executor)
+      await resolvePinnedBlock(options, executor)
+    }
+    return []
+  }
 
   // TOCTOU fix (external review, P1): snapshot the caller-owned array BEFORE
   // the consumption pipeline runs, and read ONLY this snapshot (`ts`) for
@@ -177,8 +248,17 @@ export async function runMultistepTasks<TResult>(
   // -> mark-consumed), see `src/core/internal.ts`. Only branded tasks
   // (`defineTask`/`buildErc20Task`/`buildErc4626Task` output) are affected —
   // legacy `MultistepTask`s pass through every step as a no-op.
-  const { batchSize, maxConcurrentBatches, adaptiveBatching, maxBatchAttempts, dedupe } = prepareRun(ts, options)
-  await resolvePinnedBlock()
+  const { batchSize, maxConcurrentBatches, adaptiveBatching, maxBatchAttempts, dedupe } = prepareRun(
+    ts,
+    options,
+    executor,
+  )
+  // F8: the ONE effective block every step's executeMulticall uses — either
+  // `options?.block` untouched (pinBlock off/absent, the default) or the
+  // resolved pin (see `resolvePinnedBlock`'s doc comment in
+  // `src/core/internal.ts`). Replaces the old direct `options?.block` read
+  // in `executeBatch` below.
+  const effectiveBlock = await resolvePinnedBlock(options, executor)
 
   // `run`'s fail-fast policy (F6a/F6b) — see `src/core/engine.ts`'s doc
   // comment for the full hook contract. `buildStepCalls`/`consumeStepResults`
@@ -202,7 +282,7 @@ export async function runMultistepTasks<TResult>(
     },
 
     executeBatch(batch) {
-      return executor.executeMulticall(batch, options?.block)
+      return executor.executeMulticall(batch, effectiveBlock)
     },
 
     consumeStepResults(taskIndex, step, results) {
