@@ -80,12 +80,16 @@ export async function runSettled<TResult>(
   tasks: MultistepTask<TResult>[],
   options?: BatchOptions,
 ): Promise<SettledTaskResult<TResult>[]> {
-  if (tasks.length === 0) return []
-
+  // Validation is a programmer error and must throw regardless of whether
+  // there happen to be any tasks — checked BEFORE the empty-tasks shortcut
+  // so `runSettled(executor, [], { batchSize: 0 })` rejects rather than
+  // silently resolving to `[]`.
   const batchSize = options?.batchSize ?? 100
   if (!Number.isInteger(batchSize) || batchSize < 1) {
     throw new Error(`batchSize must be a positive integer, got ${batchSize}`)
   }
+
+  if (tasks.length === 0) return []
 
   const maxStep = tasks.reduce((max, task) => (task.maxStep > max ? task.maxStep : max), 0)
 

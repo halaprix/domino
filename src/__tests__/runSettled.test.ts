@@ -240,13 +240,65 @@ describe('runSettled', () => {
     }
   })
 
-  it('consumeStepResults throws for task A at step 1 -> A rejected, dead (no step-2 buildStepCalls), B completes', async () => {
-    const boom = new Error('consume boom')
-    let taskABuildStep2Called = false
+  it('multi-batch step: middle batch rejects, both neighbors succeed -> only the middle keys carry batch failures', async () => {
+    const boom = new Error('middle batch down')
 
     const mockExecutor: StepExecutor = {
       async executeMulticall(calls: StepCall[]): Promise<RawResult[]> {
-        return calls.map(() => ({ status: 'success' as const, value: 'ok' }))
+        if (calls[0]?.key === 'k1') {
+          throw boom
+        }
+        return calls.map((c) => ({ status: 'success' as const, value: 'ok-' + c.key }))
+      },
+    }
+
+    const captured: Record<string, StepResult[]> = {}
+
+    const makeTask = (key: string): MultistepTask<StepResult[]> => ({
+      maxStep: 1,
+      buildStepCalls(step) {
+        if (step !== 1) return []
+        return [{ key, target: ADDR, abi: [], functionName: 'f' }]
+      },
+      consumeStepResults(_step, results) {
+        captured[key] = results
+      },
+      finalize() {
+        return captured[key] ?? []
+      },
+    })
+
+    // 3 tasks x 1 call each, batchSize 1 -> 3 physical batches (k0, k1, k2).
+    // Only the middle one (k1) rejects.
+    const tasks = [makeTask('k0'), makeTask('k1'), makeTask('k2')]
+
+    const results = await runSettled(mockExecutor, tasks, { batchSize: 1 })
+
+    expect(results.every((r) => r.status === 'fulfilled')).toBe(true)
+
+    // Exact set of keys that succeeded: both neighbors, unaffected by the
+    // middle batch's rejection (nonzero-batchStart routing on both sides).
+    expect(captured['k0']).toEqual([{ status: 'success', key: 'k0', value: 'ok-k0' }])
+    expect(captured['k2']).toEqual([{ status: 'success', key: 'k2', value: 'ok-k2' }])
+
+    // Exact set of keys carrying a `batch` failure: only k1.
+    expect(captured['k1']).toHaveLength(1)
+    const errMid = (captured['k1']![0] as { status: 'failure'; error?: unknown }).error
+    expect(errMid).toBeInstanceOf(DominoCallError)
+    expect((errMid as DominoCallError).kind).toBe('batch')
+    expect((errMid as DominoCallError).cause).toBe(boom)
+    expect((errMid as DominoCallError).key).toBe('k1')
+  })
+
+  it('consumeStepResults throws for task A at step 1 -> A rejected, dead (no step-2 buildStepCalls), B (maxStep 2) continues its own step-2 routing correctly', async () => {
+    const boom = new Error('consume boom')
+    let taskABuildStep2Called = false
+
+    // Distinguishable per-key values so step-2 routing correctness for the
+    // surviving sibling can be asserted precisely, not just "didn't throw".
+    const mockExecutor: StepExecutor = {
+      async executeMulticall(calls: StepCall[]): Promise<RawResult[]> {
+        return calls.map((c) => ({ status: 'success' as const, value: 'val-' + c.key }))
       },
     }
 
@@ -268,15 +320,35 @@ describe('runSettled', () => {
       },
     }
 
-    const taskB: MultistepTask<{ v: string }> = {
-      maxStep: 1,
+    // B has maxStep 2 (deliberately, per code-review finding) so a real
+    // step-2 call/result-routing cycle runs for a surviving lower-priority
+    // task AFTER a lower-index task (A) has already died at step 1 — proving
+    // dead-task skipping doesn't disturb step-2 dispatch/consumption for
+    // everyone else.
+    let capturedB1: string | undefined
+    let capturedB2: string | undefined
+    let taskBStep2Results: StepResult[] = []
+
+    const taskB: MultistepTask<{ step1: string | undefined; step2: string | undefined }> = {
+      maxStep: 2,
       buildStepCalls(step) {
-        if (step !== 1) return []
-        return [{ key: 'b1', target: ADDR, abi: [], functionName: 'symbol' }]
+        if (step === 1) return [{ key: 'b1', target: ADDR, abi: [], functionName: 'symbol' }]
+        if (step === 2) return [{ key: 'b2', target: ADDR, abi: [], functionName: 'decimals' }]
+        return []
       },
-      consumeStepResults() {},
+      consumeStepResults(step, results) {
+        if (step === 1) {
+          const r = results.find((r) => r.key === 'b1' && r.status === 'success')
+          capturedB1 = r?.status === 'success' ? (r.value as string) : undefined
+        }
+        if (step === 2) {
+          taskBStep2Results = results
+          const r = results.find((r) => r.key === 'b2' && r.status === 'success')
+          capturedB2 = r?.status === 'success' ? (r.value as string) : undefined
+        }
+      },
       finalize() {
-        return { v: 'fine' }
+        return { step1: capturedB1, step2: capturedB2 }
       },
     }
 
@@ -288,9 +360,12 @@ describe('runSettled', () => {
       diagnostics: { optionalFailures: [] },
     })
     expect(taskABuildStep2Called).toBe(false)
+
+    // B's step-2 call actually executed and routed the correct value back.
+    expect(taskBStep2Results).toEqual([{ status: 'success', key: 'b2', value: 'val-b2' }])
     expect(resultB).toEqual({
       status: 'fulfilled',
-      value: { v: 'fine' },
+      value: { step1: 'val-b1', step2: 'val-b2' },
       diagnostics: { optionalFailures: [] },
     })
   })
@@ -373,5 +448,17 @@ describe('runSettled', () => {
     }
     const results = await runSettled(mockExecutor, [])
     expect(results).toEqual([])
+  })
+
+  it('rejects invalid batchSize even with an empty tasks array (validation runs before the empty-tasks shortcut)', async () => {
+    const mockExecutor: StepExecutor = {
+      async executeMulticall(): Promise<RawResult[]> {
+        return []
+      },
+    }
+
+    await expect(runSettled(mockExecutor, [], { batchSize: 0 })).rejects.toThrow(
+      'batchSize must be a positive integer',
+    )
   })
 })
