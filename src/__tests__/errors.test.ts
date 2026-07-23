@@ -35,6 +35,7 @@ describe('DominoCallError', () => {
       cause: original,
     })
 
+    expect(Object.hasOwn(err, 'cause')).toBe(true)
     expect(err.cause).toBe(original)
     expect((err.cause as Error).stack).toBe(original.stack)
     expect((err.cause as Error).stack).toBeTruthy()
@@ -67,11 +68,17 @@ describe('DominoCallError', () => {
     expect(err.key).toBe('bar')
   })
 
-  it('has no cause when opts.cause is not passed (revert kind)', () => {
+  it('has no cause when opts.cause is not passed (revert kind) — no own `cause` property at all', () => {
     const err = new DominoCallError('Call baz reverted', {
       kind: 'revert',
       data: '0x',
     })
+    // Not just `undefined` by absence-of-property lookup — genuinely no own
+    // `cause` property. Passing `{ cause: undefined }` to the Error constructor
+    // would install an own `cause: undefined` property per ES2022 semantics,
+    // which is observably different (and would violate the F4 taxonomy table:
+    // `revert` has no cause).
+    expect(Object.hasOwn(err, 'cause')).toBe(false)
     expect(err.cause).toBeUndefined()
   })
 

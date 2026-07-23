@@ -183,6 +183,8 @@ describe('Eip1193Executor', () => {
     expect(err.functionName).toBe('totalSupply')
     expect(err.key).toBe('bad')
     expect(err.cause).toBeUndefined()
+    // Must be genuinely absent, not an own `cause: undefined` property.
+    expect(Object.hasOwn(err, 'cause')).toBe(false)
   })
 
   it('success=true but garbage returnData that fails decoding → kind "decode", data = garbage bytes, cause = decode error', async () => {

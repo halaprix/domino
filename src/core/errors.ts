@@ -57,7 +57,22 @@ export class DominoCallError extends Error {
 
   constructor(message: string, opts: DominoCallErrorOptions) {
     // Standard Error cause chain — never discard provider/decode stacks.
-    super(message, { cause: opts.cause })
+    //
+    // Must NOT pass `{ cause: opts.cause }` unconditionally: per ES2022,
+    // ErrorOptions installs an own `cause` property whenever the `cause` key
+    // is present on the options object, even when its value is `undefined`.
+    // That would give every no-cause DominoCallError (e.g. `revert`, whose
+    // taxonomy row has no cause) an own `cause: undefined` property, which
+    // is observably different from "no cause at all" (`Object.hasOwn` would
+    // wrongly report true). Only pass the options object when a cause was
+    // actually supplied.
+    //
+    // Accepted trade-off: a future `derive` kind wrapping a literal
+    // `throw undefined` would be indistinguishable from "no cause supplied"
+    // — both omit the own `cause` property. This is fine; `derive` always
+    // has SOME thrown value in practice, and `throw undefined` is itself
+    // pathological.
+    super(message, opts.cause !== undefined ? { cause: opts.cause } : undefined)
     this.name = 'DominoCallError'
     this.kind = opts.kind
     // exactOptionalPropertyTypes-safe: only assign optional fields when provided,
