@@ -7,10 +7,13 @@
  * back into per-task `StepResult[]` arrays.
  *
  * The ONLY behavior that differs between `run` (fail-fast) and `runSettled`
- * (record-and-continue) is captured in the 3-hook `StepEnginePolicy` each
- * runner builds for itself, closing over its own state (`ts`, and — for
+ * (record-and-continue) is captured in the `StepEnginePolicy` each runner
+ * builds for itself, closing over its own state (`ts`, and — for
  * `runSettled` only — its `dead`/`deadError` bookkeeping). `runSteps` never
  * sees that state; it just calls the hooks and trusts their return values.
+ * F6b adds one more (optional) hook, `recordTerminal` — see its doc comment
+ * below and `src/core/pool.ts`'s "Terminal policy hook" section for the full
+ * adaptive-bisection design.
  *
  * What stays OUTSIDE this module (deliberately): the F2 consumption
  * pipeline (`prepareRun`/`resolvePinnedBlock`, `internal.ts`) and the final
@@ -22,9 +25,10 @@ import type { MultistepTask, StepCall, StepResult, RawResult } from './types'
 import { runBatchPool } from './pool'
 
 /**
- * The 3 hooks that fully capture `run` vs `runSettled`'s divergence. Each
- * runner builds one instance of this per call, as plain closures over its
- * own local state — see `runMultistepTasks.ts`/`runSettled.ts`.
+ * The hooks that fully capture `run` vs `runSettled`'s divergence — 3 as of
+ * F6a, plus the optional `recordTerminal` added by F6b. Each runner builds
+ * one instance of this per call, as plain closures over its own local state
+ * — see `runMultistepTasks.ts`/`runSettled.ts`.
  */
 export interface StepEnginePolicy {
   /**
@@ -43,14 +47,19 @@ export interface StepEnginePolicy {
   /**
    * Execute ONE physical batch of calls. This is the only hook
    * `runBatchPool` actually calls, so it is the only one whose rejection
-   * behavior matters for cancellation:
+   * behavior matters for cancellation/bisection:
    *   - `run`'s hook is the raw, unwrapped `executor.executeMulticall` call
-   *     (plus the length-mismatch guard) — a rejection here is exactly what
-   *     triggers fail-fast.
-   *   - `runSettled`'s hook catches a transport rejection and *resolves*
-   *     with synthesized per-call `kind:'batch'` failures instead; it only
-   *     ever rejects for the length-mismatch executor-bug case (which is
-   *     deliberately NOT converted into a recorded failure).
+   *     — a rejection here is exactly what feeds the pool's bisection (F6b)
+   *     and, once terminal, its fail-fast cancellation. The length-mismatch
+   *     guard now lives in the pool itself (`src/core/pool.ts`), not here —
+   *     it applies uniformly to whole batches AND bisected sub-batches.
+   *   - `runSettled`'s hook, with adaptive bisection OFF (default), catches
+   *     a transport rejection and *resolves* with synthesized per-call
+   *     `kind:'batch'` failures instead — this is what makes `runSettled`
+   *     never cancel on an ordinary transport failure. With adaptive ON, it
+   *     deliberately lets the rejection propagate to the pool instead, so
+   *     bisection can split it — the per-call synthesis then happens once,
+   *     at the TERMINAL point, via `recordTerminal` below.
    */
   executeBatch(batch: StepCall[]): Promise<RawResult[]>
 
@@ -60,12 +69,28 @@ export interface StepEnginePolicy {
    * and marks the task dead.
    */
   consumeStepResults(taskIndex: number, step: number, results: StepResult[]): void
+
+  /**
+   * Adaptive bisection's terminal hook (F6b) — see
+   * `BisectionPolicy.recordTerminal` in `src/core/pool.ts` for the full
+   * contract. Present only for `runSettled` (never cancel on a terminal
+   * batch failure — synthesize a per-call `kind:'batch'` `DominoCallError`
+   * instead). Absent for `run`, whose terminal handling is the pool's plain
+   * fail-fast cancellation, unchanged from T14 in shape.
+   */
+  recordTerminal?(calls: StepCall[], error: unknown): RawResult[]
 }
 
 /** The subset of `BatchOptions` the engine itself needs. */
 export interface StepEngineOptions {
   batchSize: number
   maxConcurrentBatches: number
+  /** F6b — see `BatchOptions.adaptiveBatching`. */
+  adaptiveBatching: boolean
+  /** F6b — see `BatchOptions.maxBatchAttempts`. Consulted by the pool only
+   *  when `adaptiveBatching` is true; otherwise any rejection is terminal
+   *  on its first occurrence regardless of this value (T14 behavior). */
+  maxBatchAttempts: number
 }
 
 /**
@@ -107,9 +132,11 @@ export async function runSteps<TResult>(
         batches.push(calls.slice(batchStart, batchStart + options.batchSize))
       }
 
-      const outcome = await runBatchPool(batches, options.maxConcurrentBatches, (batch) =>
-        policy.executeBatch(batch),
-      )
+      const outcome = await runBatchPool(batches, options.maxConcurrentBatches, (batch) => policy.executeBatch(batch), {
+        adaptive: options.adaptiveBatching,
+        maxBatchAttempts: options.maxBatchAttempts,
+        ...(policy.recordTerminal ? { recordTerminal: policy.recordTerminal } : {}),
+      })
 
       if (outcome.outcome === 'cancelled') {
         // Spec (d): in-flight results are discarded — we never look at

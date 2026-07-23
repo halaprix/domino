@@ -69,16 +69,18 @@ const consumed = new WeakSet<object>()
 type Branded<T> = MultistepTask<T> & SingleUseCarrier
 
 /**
- * Numeric options validated + defaulted by `validateOptions` (F6a). All
- * three ride through `prepareRun`'s return value; `maxBatchAttempts` is
- * validated and defaulted here but not yet CONSUMED by either runner —
- * bisection (T15) wires it into the engine without touching this function
- * again.
+ * Numeric (+ one boolean) options validated + defaulted by `validateOptions`
+ * (F6a/F6b). All four ride through `prepareRun`'s return value.
+ * `maxBatchAttempts` and `adaptiveBatching` are both consumed by the engine
+ * (`src/core/engine.ts`/`src/core/pool.ts`, F6b) — `adaptiveBatching` gates
+ * whether bisection ever runs at all; `maxBatchAttempts` bounds it once it
+ * does.
  */
 export interface ValidatedRunOptions {
   batchSize: number
   maxConcurrentBatches: number
   maxBatchAttempts: number
+  adaptiveBatching: boolean
 }
 
 /** Options `validateOptions` reads — a structural subset of `BatchOptions`. */
@@ -86,6 +88,7 @@ export interface NumericOptionsInput {
   batchSize?: number
   maxConcurrentBatches?: number
   maxBatchAttempts?: number
+  adaptiveBatching?: boolean
 }
 
 /**
@@ -125,7 +128,13 @@ export function validateOptions(o: NumericOptionsInput | undefined): ValidatedRu
   const maxBatchAttempts = o?.maxBatchAttempts ?? defaultMaxBatchAttempts
   validatePositiveSafeInteger('maxBatchAttempts', maxBatchAttempts)
 
-  return { batchSize, maxConcurrentBatches, maxBatchAttempts }
+  // Not a positive-safe-integer field — a plain boolean flag (F6b), default
+  // `false` (see `BatchOptions.adaptiveBatching`'s doc comment for why: rate
+  // limiting makes bisection's retry amplification actively harmful unless a
+  // caller has opted in with knowledge of their transport's failure modes).
+  const adaptiveBatching = o?.adaptiveBatching ?? false
+
+  return { batchSize, maxConcurrentBatches, maxBatchAttempts, adaptiveBatching }
 }
 
 /**

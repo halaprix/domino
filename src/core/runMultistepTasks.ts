@@ -51,15 +51,49 @@ export interface BatchOptions {
 
   /**
    * Maximum retry attempts for a failing physical batch before it is
-   * treated as a terminal failure (adaptive bisection, F6b). Default:
+   * treated as a terminal failure (adaptive bisection, F6b) — counted PER
+   * ORIGINAL batch: every execution of that original batch or any of its
+   * bisected sub-batches counts, successful or not, including the
+   * original's own first execution. Default:
    * `2 * Math.ceil(Math.log2(batchSize)) + 1`. Must be a positive safe
-   * integer ≥ 1 — anything else throws.
+   * integer ≥ 1 — anything else throws. Only consulted when
+   * `adaptiveBatching` is `true`.
    *
-   * Validated and defaulted as of F6a, but NOT YET consumed — every batch
-   * failure is currently terminal on first rejection (no retry/bisection).
-   * Adaptive bisection lands in a later release.
+   * Fully isolating every bad call in a batch can require up to `2N − 1`
+   * executions (`N` = batch size) in the worst case (multiple bad calls
+   * spread across the batch). The default cap is sized for the common
+   * single-bad-call case; a batch with multiple failing calls may exhaust
+   * it before every one is individually isolated — under `runSettled` this
+   * produces one or more coarser-grained `kind: 'batch'` failures instead of
+   * fully isolated ones, never wrong data (unaffected calls always keep
+   * their real values).
    */
   maxBatchAttempts?: number
+
+  /**
+   * Enable adaptive bisection (F6b): when a physical batch's executor call
+   * rejects (a transport/RPC-level failure — never a per-call revert, which
+   * is already isolated via `allowFailure`) and the batch has more than one
+   * call, split it in half and retry both halves independently instead of
+   * treating the whole batch as failed. Recurses until either every call is
+   * isolated to its own single-call execution, or `maxBatchAttempts` is
+   * exhausted for that original batch. Default: `false`.
+   *
+   * **Off by default.** Bisection cannot distinguish a genuine per-call
+   * failure (e.g. an out-of-gas call poisoning its whole batch) from a
+   * transient transport problem like HTTP 429 rate-limiting — under rate
+   * limiting, retrying amplifies load into an already-throttled endpoint by
+   * up to `2N − 1` calls for a single original batch. Enable this once you
+   * know your transport/RPC failures are dominated by genuinely bad calls,
+   * not rate limits; leave it off (or handle 429s at the transport layer)
+   * otherwise. A future failure-cause classification may allow enabling
+   * this safely by default.
+   *
+   * With this off, `run` and `runSettled` are both byte-for-byte identical
+   * to their pre-F6b (1.1) behavior — a batch rejection is terminal
+   * immediately, `maxBatchAttempts` is never consulted.
+   */
+  adaptiveBatching?: boolean
 
   /** Block to query at (defaults to 'latest'). Same block used for ALL steps. */
   block?: BlockParam
@@ -116,15 +150,23 @@ export async function runMultistepTasks<TResult>(
   // -> mark-consumed), see `src/core/internal.ts`. Only branded tasks
   // (`defineTask`/`buildErc20Task`/`buildErc4626Task` output) are affected —
   // legacy `MultistepTask`s pass through every step as a no-op.
-  const { batchSize, maxConcurrentBatches } = prepareRun(ts, options)
+  const { batchSize, maxConcurrentBatches, adaptiveBatching, maxBatchAttempts } = prepareRun(ts, options)
   await resolvePinnedBlock()
 
-  // `run`'s fail-fast policy (F6a) — see `src/core/engine.ts`'s doc comment
-  // for the full hook contract. Every hook here either lets a throw
-  // propagate untouched (buildStepCalls/consumeStepResults — a plain
-  // synchronous throw inside this async function's body, exactly like the
-  // pre-F6a code) or is the raw unwrapped executor call (executeBatch),
-  // whose rejection is what `runBatchPool` treats as the fail-fast trigger.
+  // `run`'s fail-fast policy (F6a/F6b) — see `src/core/engine.ts`'s doc
+  // comment for the full hook contract. `buildStepCalls`/`consumeStepResults`
+  // let a throw propagate untouched (a plain synchronous throw inside this
+  // async function's body, exactly like the pre-F6a code). `executeBatch` is
+  // the raw, unwrapped executor call — nothing here branches on
+  // `adaptiveBatching`, because bisection is entirely the POOL's decision
+  // (see `src/core/pool.ts`), not this policy's: the exact same call works
+  // whether the pool hands it a whole batch or a bisected sub-batch. The
+  // length-mismatch guard also now lives in the pool (checked uniformly
+  // after any `execute()` resolves) rather than here — see its doc comment
+  // for why that's also what makes "never retried" free. `recordTerminal` is
+  // deliberately NOT provided: a terminal batch (single-call rejection, or
+  // the attempts cap exhausted) always triggers the pool's fail-fast
+  // cancellation, exactly as T14, whether or not bisection ever ran.
   const policy: StepEnginePolicy = {
     buildStepCalls(taskIndex, step) {
       const task = ts[taskIndex]!
@@ -132,17 +174,8 @@ export async function runMultistepTasks<TResult>(
       return task.buildStepCalls(step)
     },
 
-    async executeBatch(batch) {
-      const results = await executor.executeMulticall(batch, options?.block)
-
-      // Dev-time guard: a misbehaving executor that returns fewer results than
-      // calls would silently corrupt routing — fail loudly instead.
-      if (results.length !== batch.length) {
-        throw new Error(
-          `StepExecutor returned ${results.length} results for ${batch.length} calls — length mismatch`,
-        )
-      }
-      return results
+    executeBatch(batch) {
+      return executor.executeMulticall(batch, options?.block)
     },
 
     consumeStepResults(taskIndex, step, results) {
@@ -153,7 +186,7 @@ export async function runMultistepTasks<TResult>(
     },
   }
 
-  await runSteps(ts, { batchSize, maxConcurrentBatches }, policy)
+  await runSteps(ts, { batchSize, maxConcurrentBatches, adaptiveBatching, maxBatchAttempts }, policy)
 
   return ts.map((task) => task.finalize())
 }
