@@ -306,7 +306,7 @@ Adaptive bisection (`adaptiveBatching: true`, off by default) automatically spli
 | `maxBatchAttempts` | `number` | `2·⌈log₂(batchSize)⌉+1` | Bounds bisection recursion. Default is sized for the common single-bad-call case; batches with multiple failing calls may exhaust it before every one is isolated (producing coarser-grained `kind: 'batch'` failures instead, never wrong data). |
 | `dedupe` | `boolean` | `false` | Cross-task call merging changes executor invocation counts seen by instrumentation/billing. Only `TypedCallSpec` calls (from `t.call` in `defineTask`) are ever eligible; legacy tasks are never affected. |
 | `block` | `BlockParam` | `{ blockTag: 'latest' }` | Block to query at (EIP-1898). Every step's `executeMulticall` call uses this parameter; without `pinBlock: true`, stable tags like `'latest'` are re-resolved by the node on each separate `eth_call`, so the chain can advance between steps. |
-| `pinBlock` | `boolean` | `false` | Resolve one concrete block at run start (+1 RPC) and reuse for every step, closing the "chain advanced between steps" gap. Requires `executor.getBlockNumber()`. |
+| `pinBlock` | `boolean` | `false` | Resolve one concrete block at run start and reuse for every step (adds +1 RPC round-trip only for absent or stable tags like `'latest'`; explicit `blockNumber`/`blockHash` add none). Closing the "chain advanced between steps" gap. Requires `executor.getBlockNumber()`. |
 | `onPin` | `(block: PinnedBlock) => void` | — | Synchronous callback reporting the resolved block (fired exactly once per run when `pinBlock: true`). Only invoked when `pinBlock: true`; supplying it without `pinBlock` is accepted but it is never called. |
 
 See `Presets.throughput` (exports: `{ maxConcurrentBatches: 5, adaptiveBatching: true, dedupe: true }`) for a ready-made bundle suited to portfolio workloads:
@@ -319,6 +319,73 @@ declare const executor: StepExecutor
 declare const tasks: MultistepTask<unknown>[]
 
 await runMultistepTasks(executor, tasks, { ...Presets.throughput, batchSize: 200 })
+```
+
+## `MultichainResolver` — parallel per-chain execution
+
+`MultichainResolver` enables executing the same task graph across multiple chains in parallel, with optional atomic block snapshots and per-chain customization. Unlike `MulticallResolver` (single-chain convenience layer), multichain targets a portfolio use case where the same read pipeline (e.g., "fetch USDC balance on mainnet, Base, Arbitrum") needs per-chain results without re-coding for each chain.
+
+### Constructor & provider vs. executor
+
+```typescript
+import { createPublicClient, http } from "viem"
+import { mainnet, base, arbitrum } from "viem/chains"
+import { Eip1193Executor, MultichainResolver } from "@halaprix/domino"
+
+// Provide an executor per chain
+const resolver = new MultichainResolver({
+  [mainnet.id]: new Eip1193Executor(createPublicClient({ chain: mainnet, transport: http() })),
+  [base.id]: new Eip1193Executor(createPublicClient({ chain: base, transport: http() })),
+  [arbitrum.id]: new Eip1193Executor(createPublicClient({ chain: arbitrum, transport: http() })),
+})
+```
+
+### Methods
+
+| Method | Signature | Notes |
+|--------|-----------|-------|
+| `chain(chainId)` | `(chainId: number) => MulticallResolver` | Retrieve a cached `MulticallResolver` wrapping the given chain's executor. Throws with a descriptive error if the chain was not registered in the constructor, listing every known chain id. |
+| `snapshot()` | `(): Promise<Record<number, bigint>>` | Atomically resolve one block number per registered chain (calls `executor.getBlockNumber()` for each). Returns a map of `chainId → blockNumber`. Used with explicit `blocks` param to pin the same observed block for every task on that chain. |
+| `runAll(plan, options?)` | `(plan: Record<number, MultistepTask<T>[]>, options?: MultichainRunOptions): Promise<Record<number, T[]>>` | Execute tasks per chain in parallel; each chain receives its own effective `block` from the `blocks` map (if present) or the base `block` option. If a plan references a chain id not registered in the constructor, throws before any executor is invoked. On chain failure, rejects with the error from the chain with the lowest id among the failed chains (deterministic). |
+| `runAllSettled(plan, options?)` | `(plan: Record<number, MultistepTask<T>[]>, options?: MultichainRunOptions): Promise<Record<number, SettledTaskResult<T>[]>>` | Per-task settlement per chain — like `runAll` but each chain's tasks settle independently; one chain's failure never blocks another. Validation (unknown chains, flattened duplicates) still runs before any chain starts. |
+
+### `MultichainRunOptions`
+
+Extends `BatchOptions` with per-chain block overrides:
+
+```typescript
+import type { BatchOptions, BlockParam } from "@halaprix/domino"
+
+// MultichainRunOptions extends BatchOptions and adds:
+type MultichainRunOptionsExtension = {
+  blocks?: Record<number, BlockParam>
+}
+```
+
+- `blocks` — optional map of `chainId → BlockParam`. When present, that chain uses the supplied block param instead of the base `options.block`; chains with no entry here fall back to `options.block` as normal. Note: `onPin` (inherited from `BatchOptions`) is the single-chain callback; each chain reports to it once per run, but it receives no chain id attribution.
+
+### Flattened duplicate-instance validation
+
+Before ANY chain executes, `runAll`/`runAllSettled` validates that single-use tasks (`defineTask`, `buildErc20Task`, `buildErc4626Task` output) are not duplicated across the entire `plan` (not just per-chain). A reused instance is detected and throws `DominoTaskReuseError` before the first executor is invoked. Build fresh tasks for each entry, or share tasks only if they are hand-written `MultistepTask` objects (which are stateless and reusable).
+
+### Chain failure determinism
+
+If multiple chains reject during `runAll`, the rejection from the chain with the LOWEST id among those that failed is thrown (deterministic tie-breaking). This mirrors the concurrency pool's own determinism rule in single-chain `run()`. `runAllSettled` never rejects on task/call failures (those are isolated per chain); it only rejects on programmer errors like unknown plan chain ids.
+
+### Single-T generic
+
+`MultichainResolver` is generic over a single result shape `T`, not a per-chain heterogeneous map. If different chains need different task shapes, call `runAll`/`runAllSettled` separately per shape:
+
+```typescript
+import { mainnet, base } from "viem/chains"
+import type { MultistepTask, MultichainResolver } from "@halaprix/domino"
+
+declare const resolver: MultichainResolver
+declare const mainnetTasks: MultistepTask<{ balance: bigint }>[]
+declare const baseTasks: MultistepTask<{ balance: bigint }>[]
+
+const mainnetResults = await resolver.runAll({ [mainnet.id]: mainnetTasks })
+const baseResults = await resolver.runAll({ [base.id]: baseTasks })
 ```
 
 ## Error taxonomy
@@ -428,7 +495,7 @@ Remember: `buildErc20Task`/`buildErc4626Task`/`defineTask` output is single-use 
 
 ## Framework-Agnostic Handlers
 
-For testing or custom backends, use the handler functions directly with any `StepExecutor`:
+For testing or custom backends, use the handler functions directly with any `StepExecutor`. (G1 note: in v1.3.0, handlers were reimplemented on `defineTask` for internal consistency; public signatures and behavior remain unchanged. Per-task error diagnostics now populate `TaskDiagnostics.optionalFailures` when used with `runSettled`.)
 
 ```typescript
 import { resolveErc4626Vault } from "@halaprix/domino"
@@ -483,6 +550,30 @@ interface Erc4626VaultResolution {
 ```
 
 `metadata.maxWithdraw`/`metadata.maxRedeem` are kept for backward compatibility and always equal `position.maxWithdraw`/`position.maxRedeem` when both are present — new code should read them off `position` (which additionally omits the keys entirely, rather than resolving to `undefined`, when the underlying call fails — see [Deprecations](#deprecations)).
+
+## Performance guidance
+
+### When `Presets.throughput` helps
+
+`Presets.throughput` bundles `maxConcurrentBatches: 5`, `adaptiveBatching: true`, and `dedupe: true` — suited for **portfolio/index workloads** where many independent reads are batched together and the same contracts/tokens appear repeatedly. It is **not** recommended for single-entity reads or when the provider's payload/rate limits are strict.
+
+### Batch size tradeoffs
+
+- **Default `batchSize: 100`** — conservative, works on all public RPCs.
+- **Larger (200–500)** — higher per-call throughput if your provider supports it (test with `npm run benchmark:live`); reduces round-trips for large workloads.
+- **Smaller (10–50)** — only if your provider has tight per-request payload limits (rare on modern RPC services).
+
+See [Benchmarks](benchmarks.md) for live timing data and provider recommendations.
+
+### Block pinning and cross-step consistency
+
+`pinBlock: true` resolves one concrete block at run start and reuses it for every step and physical batch. When the `block` option is absent or carries a stable tag (e.g. `'latest'`), this adds +1 RPC round-trip; when an explicit `blockNumber` or `blockHash` is provided, no extra RPC is incurred (the value is used as-is). Pinning guarantees all reads see the same EVM state, even if the chain advances between steps. For single-step tasks or when eventual consistency is acceptable, omit `pinBlock` (default `false`).
+
+`MultichainResolver.snapshot()` similarly pins one block per chain, but returns the block map explicitly so the caller can reuse it across multiple `runAll` calls without re-resolving. Use this when a cross-chain comparison needs the same block observed once, then held stable for follow-up queries.
+
+### Dedup hit-rate
+
+`dedupe: true` merges calls with identical `(target, calldata, output signature)` **within one step, across tasks**, before batching/bisection. The hit rate depends on repetition (how many tasks reference the same contract/function), not batch size. See [Benchmarks § Dedup Hit Rate](benchmarks.md#dedup-hit-rate-f7) for examples and a code sample showing 90% call reduction in a same-token portfolio.
 
 ## Deprecations
 
@@ -541,6 +632,14 @@ Import the following directly from `@halaprix/domino` (this list is exhaustive �
 - `resolveErc4626Bulk(params: { entries: { vault: Address; owner?: Address }[]; batchSize?: number; block?: BlockParam }): Promise<Erc4626VaultResolution[]>`
 - `makeResolver<TAddr extends string = Address>(executor: StepExecutor): ResolverEngine<TAddr>` — `@deprecated`, equivalent to `new MulticallResolver(executor)`
 - `ResolverEngine<TAddr extends string = Address>` — the interface `MulticallResolver` implements. `TAddr` is the address representation the engine's params accept — `Address` (`0x${string}`) by default, or plain `string` for an engine (e.g. ethers v5) that doesn't use the `0x${string}` template-literal type.
+
+**`MultichainResolver` class** — parallel per-chain execution (see [MultichainResolver](#multichainresolver--parallel-per-chain-execution) section above):
+- `constructor(chains: Record<number, StepExecutor>)`
+- `chain(chainId: number): StepExecutor | undefined`
+- `snapshot(): Promise<Record<number, bigint>>`
+- `runAll<T>(plan: Record<number, MultistepTask<T>[]>, options?: MultichainRunOptions): Promise<Record<number, T[]>>`
+- `runAllSettled<T>(plan: Record<number, MultistepTask<T>[]>, options?: MultichainRunOptions): Promise<Record<number, SettledTaskResult<T>[]>>`
+- `MultichainRunOptions` — extends `BatchOptions` with `blocks?: Record<number, BlockParam>` and `onPin?: Record<number, (block: PinnedBlock) => void>`
 
 **Constants and deployment helpers:**
 - `MULTICALL3_ADDRESS: Address`

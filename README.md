@@ -17,7 +17,7 @@ _|    _|  _|    _|  _|    _|    _|  _|  _|    _|  _|    _|
 
 [![CI](https://github.com/halaprix/domino/actions/workflows/ci.yml/badge.svg)](https://github.com/halaprix/domino/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/@halaprix/domino)](https://www.npmjs.com/package/@halaprix/domino)
-[![bundle size](https://img.shields.io/badge/gzip-16.8KB-brightgreen)](https://www.npmjs.com/package/@halaprix/domino)
+[![bundle size](https://img.shields.io/badge/gzip-16.8KB-brightgreen)](https://www.npmjs.com/package/@halaprix/domino) (v1.3.0)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5-blue)](https://www.typescriptlang.org/)
 [![MIT License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -235,6 +235,52 @@ const oldVault = await resolveErc4626Vault({
 
 Works with `blockHash`, `blockTag`, or `blockNumber`. Even on chains where Multicall3 didn't exist yet — domino falls back to deployless multicall automatically.
 
+## Multichain queries with `MultichainResolver`
+
+Execute the same task graph across multiple chains in parallel, with atomic block snapshots per chain:
+
+```typescript
+import { createPublicClient, http } from "viem"
+import { mainnet, base } from "viem/chains"
+import { Eip1193Executor, MultichainResolver, defineTask } from "@halaprix/domino"
+import type { Address } from "@halaprix/domino"
+
+const resolver = new MultichainResolver({
+  [mainnet.id]: new Eip1193Executor(createPublicClient({ chain: mainnet, transport: http() })),
+  [base.id]: new Eip1193Executor(createPublicClient({ chain: base, transport: http() })),
+})
+
+// Snapshot block numbers per chain for atomicity
+const blocks = await resolver.snapshot()
+
+declare const vaultAddress: Address
+declare const ownerAddress: Address
+
+// Task factory — create a fresh task per chain (tasks are single-run)
+const makeTask = () =>
+  defineTask((t) => ({
+    balance: t.call({
+      target: vaultAddress,
+      abi: [{ type: 'function', name: 'balanceOf', stateMutability: 'view', inputs: [{ type: 'address' }], outputs: [{ type: 'uint256' }] }],
+      functionName: 'balanceOf',
+      args: [ownerAddress],
+    }),
+  }))
+
+// Run the same task graph on each chain with pinned blocks
+const results = await resolver.runAll({
+  [mainnet.id]: [makeTask()],
+  [base.id]: [makeTask()],
+}, {
+  blocks: Object.fromEntries(
+    Object.entries(blocks).map(([cid, num]) => [cid, { blockNumber: num }])
+  ),
+})
+// results is { [mainnet.id]: [...], [base.id]: [...] }
+```
+
+For a complete example spanning Aave v3, Spark, and Morpho Blue across chains, see [`examples/refinance.ts`](examples/refinance.ts).
+
 ## When NOT to use it
 
 - Pure batches (no dependencies) → plain `multicall` is simpler.
@@ -247,7 +293,8 @@ Works with `blockHash`, `blockTag`, or `blockNumber`. Even on chains where Multi
 |--------|-----------|
 | `defineTask()` | **Recommended.** Ref-graph task builder — `t.call`/`t.derive`, compiles to a `MultistepTask` |
 | `runSettled()` | Per-task settlement — every task gets its own fulfilled/rejected outcome instead of one failure aborting the whole call |
-| `MulticallResolver` | Convenience layer — call `run()`/`runSettled()` to execute a state machine |
+| `MultichainResolver` | Parallel per-chain execution — `chain()`, `snapshot()`, `runAll()`/`runAllSettled()` with per-chain block pinning and atomicity |
+| `MulticallResolver` | Single-chain convenience layer — call `run()`/`runSettled()` to execute a state machine |
 | `Eip1193Executor` | Single engine — works with any EIP-1193 provider |
 | `runMultistepTasks()` | Core FSM — bare-metal version of the resolver |
 | `DominoCallError` | Structured error for a failed call — `kind` discriminates revert/decode/batch/skipped/derive |
@@ -263,10 +310,10 @@ Works with `blockHash`, `blockTag`, or `blockNumber`. Even on chains where Multi
 
 ## Documentation
 
+- [API Reference](docs/api-reference.md) — full `defineTask`, `runSettled`, `MultichainResolver`, `Eip1193Executor` docs
+- [Benchmarks](docs/benchmarks.md) — bundle size, RPC round-trip counts, `Presets.throughput` tuning
+- [Refinance example](examples/refinance.ts) — Aave v3/Spark/Morpho across chains, dynamic `Ref<Address>` targets, per-chain block pinning
 - [Architecture & AI Context](CLAUDE.md)
-- [API Reference](docs/api-reference.md)
-- [Benchmarks](docs/benchmarks.md)
-- [Refinance example](examples/refinance.ts) — Aave v3/Spark/Morpho across chains, dynamic `Ref<Address>` targets, `Presets.throughput`, `MultichainResolver`
 - [Migration Guide](MIGRATION.md)
 - [Changelog](CHANGELOG.md)
 
