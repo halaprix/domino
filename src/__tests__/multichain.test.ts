@@ -230,6 +230,63 @@ describe('MultichainResolver — snapshot()', () => {
     // fails this test itself if chain 1's already-resolved promise, or any
     // derived promise, ever leaks.
   })
+
+  // External review, P1: `.map()` used to invoke `executor.getBlockNumber()`
+  // directly. A non-conforming custom executor whose `getBlockNumber` throws
+  // SYNCHRONOUSLY (instead of returning a rejected promise) would abort that
+  // `.map()` call mid-iteration — discarding any promise an EARLIER chain's
+  // (conforming) call already created, with no handler ever attached to it.
+  // If that earlier promise rejects later, it leaks as an unhandled
+  // rejection. Fixed by deferring every call through
+  // `Promise.resolve().then(...)` so `.map()` itself can never throw.
+  it('P1 regression: chain A returns a later-rejecting promise, chain B throws synchronously -> snapshot rejects deterministically; no unhandled rejections', async () => {
+    const boomA = new Error('chain 1 getBlockNumber rejected later')
+    const boomB = new Error('chain 2 getBlockNumber threw synchronously')
+
+    // Deliberately NOT `makeExecutor` here: `vi.fn`'s own internal
+    // settlement tracking attaches a handler to any promise a mocked
+    // implementation returns, which silently masks exactly the
+    // unhandled-rejection bug this test exists to catch (verified directly:
+    // a `vi.fn`-wrapped executor could NOT reproduce the leak even against
+    // the pre-fix code). Plain, unmocked executor objects only, so the
+    // global guard is actually exercising real promise-handling behavior.
+    const execA: StepExecutor = {
+      async executeMulticall(calls) {
+        return calls.map((): RawResult => ({ status: 'success', value: 1n }))
+      },
+      getBlockNumber(): Promise<bigint> {
+        return new Promise((_resolve, reject) => {
+          setTimeout(() => reject(boomA), 10)
+        })
+      },
+    }
+
+    // Deliberately non-conforming: throws synchronously instead of
+    // returning a rejected promise (the type signature says `Promise<bigint>`,
+    // but nothing at runtime enforces an `async` implementation).
+    const execB: StepExecutor = {
+      async executeMulticall(calls) {
+        return calls.map((): RawResult => ({ status: 'success', value: 1n }))
+      },
+      getBlockNumber(): Promise<bigint> {
+        throw boomB
+      },
+    }
+
+    const resolver = new MultichainResolver({ 1: execA, 2: execB })
+
+    // Chain B's synchronous throw settles on the very next microtask; chain
+    // A's rejection only lands after a real 10ms timer — microtasks always
+    // drain before the next macrotask, so which error wins is deterministic
+    // regardless of how the two chains happen to be ordered internally.
+    await expect(resolver.snapshot()).rejects.toBe(boomB)
+
+    // Let chain A's delayed rejection actually land. Before the P1 fix, its
+    // promise (created, then discarded when `.map()` aborted on chain B's
+    // synchronous throw) would never have had a handler attached — the
+    // global unhandledRejection guard would fail THIS test once it fires.
+    await sleep(20)
+  })
 })
 
 // ─── 4. [v5] Flattened duplicate-instance validation ─────────────────────

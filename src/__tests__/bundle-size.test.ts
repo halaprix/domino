@@ -115,6 +115,22 @@
  *   before: 56,205 bytes (54.89KB)  gzip 14,282 bytes (13.95KB)
  *   after:  65,226 bytes (63.70KB)  gzip 17,065 bytes (16.67KB)
  *   delta:  +9,021 bytes raw (+8.81KB)  +2,783 bytes gzip (+2.72KB)
+ *
+ * 1.3 (F9 external-review round — 2 accepted findings, same 18KB ceiling):
+ * (P1) `snapshot()`'s `getBlockNumber()` calls are now wrapped in
+ * `Promise.resolve().then(...)` — a non-conforming custom executor that
+ * throws SYNCHRONOUSLY (instead of rejecting a promise) used to abort the
+ * `.map()` mid-iteration, discarding an earlier chain's already-created
+ * promise with no handler ever attached to it (a real, reproduced
+ * unhandled-rejection leak, not hypothetical). (P2) the flattened
+ * cross-chain duplicate scan (`assertNoFlattenedDuplicates`) now calls a
+ * shared `isSingleUseTask()` predicate (`src/core/internal.ts`) instead of
+ * re-implementing the brand check inline — `rejectDuplicateInstances`/
+ * `markTasksConsumed` now call the same predicate too, replacing the inline
+ * `Branded<T>`-cast pattern those two used before. Measured delta:
+ *   before: 65,226 bytes (63.70KB)  gzip 17,065 bytes (16.67KB)
+ *   after:  66,345 bytes (64.79KB)  gzip 17,533 bytes (17.12KB)
+ *   delta:  +1,119 bytes raw (+1.09KB)  +468 bytes gzip (+0.46KB)
  */
 
 import { describe, expect, it } from 'vitest'

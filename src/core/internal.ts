@@ -35,10 +35,12 @@
  * terse (`t`/`ts`/`o` for task/tasks/options) — a legacy artifact of a
  * retired raw-byte bundle budget. This module is 100% internal (imported
  * only by `defineTask.ts`/`erc20.ts`/`erc4626.ts`/the two runners, plus
- * `engine/multichain.ts` (F9) for the `SINGLE_USE` brand alone — its
- * flattened, cross-chain duplicate check mirrors `rejectDuplicateInstances`
- * below rather than calling it, since it scans a whole plan of per-chain
- * arrays instead of one), so future code should prefer descriptive names.
+ * `engine/multichain.ts` (F9) for `isSingleUseTask` — its flattened,
+ * cross-chain duplicate check shares that ONE predicate with
+ * `rejectDuplicateInstances` below rather than re-implementing the brand
+ * check independently (external review, P2), even though the surrounding
+ * scan loop itself is necessarily different — a whole plan of per-chain
+ * arrays, not one array), so future code should prefer descriptive names.
  */
 
 import type { MultistepTask, StepExecutor, BlockParam, PinnedBlock } from './types'
@@ -81,10 +83,28 @@ const consumed = new WeakSet<object>()
  */
 export const DEDUPE_ELIGIBLE: unique symbol = Symbol('domino.dedupeEligible')
 
-/** TS-only convenience for the brand-check casts below — erased at compile
- *  time, so using it at 3 call sites (instead of a real `isBranded()`
- *  function) costs zero extra runtime bytes over one. */
-type Branded<T> = MultistepTask<T> & SingleUseCarrier
+/**
+ * True iff `t` carries the internal `SINGLE_USE` brand — i.e. it was
+ * produced by `defineTask()`/`buildErc20Task()`/`buildErc4626Task()`, not
+ * hand-authored. The one true "is this task subject to the single-use guard
+ * at all" check — shared by `rejectDuplicateInstances` and
+ * `markTasksConsumed` below, AND by `MultichainResolver`'s flattened,
+ * cross-chain duplicate scan (`src/engine/multichain.ts`, F9's [v5] rule).
+ * One source of truth so none of the three can ever drift on what counts as
+ * "branded" (external review, P2 — the flattened scan originally
+ * re-implemented this exact check independently; a prior draft of THIS
+ * module also reasoned that inlining the cast at each call site, rather than
+ * a real predicate function, cost zero extra runtime bytes — true only while
+ * every call site lived in this one file. Once a 4th call site appeared in a
+ * different module, sharing the check outweighs that marginal byte saving).
+ *
+ * Untyped on purpose (`MultistepTask<unknown>`, not `MultistepTask<T>`): the
+ * check itself never touches `T` — it only reads a symbol-keyed property —
+ * so no call site needs to thread a type parameter through just to call this.
+ */
+export function isSingleUseTask(t: MultistepTask<unknown>): boolean {
+  return Boolean((t as MultistepTask<unknown> & SingleUseCarrier)[SINGLE_USE])
+}
 
 /**
  * Numeric (+ two boolean) options validated + defaulted by `validateOptions`
@@ -198,7 +218,7 @@ export function validateOptions(o: NumericOptionsInput | undefined): ValidatedRu
 export function rejectDuplicateInstances<T>(ts: MultistepTask<T>[]): void {
   let seen: Set<MultistepTask<T>> | undefined
   for (const t of ts) {
-    if (!(t as Branded<T>)[SINGLE_USE]) continue
+    if (!isSingleUseTask(t)) continue
     seen ??= new Set()
     if (seen.has(t)) {
       throw new DominoTaskReuseError(
@@ -271,7 +291,7 @@ export function validatePinCapability(options: PinOptionsInput | undefined, exec
  */
 export function markTasksConsumed<T>(ts: MultistepTask<T>[]): void {
   for (const t of ts) {
-    if ((t as Branded<T>)[SINGLE_USE] && consumed.has(t)) {
+    if (isSingleUseTask(t) && consumed.has(t)) {
       throw new DominoTaskReuseError(
         'Task instance already consumed: domino tasks are single-run — create a fresh task ' +
           'for each run (factories such as buildErc20Task/defineTask return a fresh instance ' +
@@ -279,7 +299,7 @@ export function markTasksConsumed<T>(ts: MultistepTask<T>[]): void {
       )
     }
   }
-  for (const t of ts) if ((t as Branded<T>)[SINGLE_USE]) consumed.add(t)
+  for (const t of ts) if (isSingleUseTask(t)) consumed.add(t)
 }
 
 /**

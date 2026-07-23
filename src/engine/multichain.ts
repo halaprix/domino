@@ -24,7 +24,7 @@
 import type { Eip1193Provider, StepExecutor, MultistepTask, BlockParam } from '../core/types'
 import { runMultistepTasks, type BatchOptions } from '../core/runMultistepTasks'
 import { runSettled, type SettledTaskResult } from '../core/runSettled'
-import { SINGLE_USE, type SingleUseCarrier } from '../core/internal'
+import { isSingleUseTask } from '../core/internal'
 import { DominoTaskReuseError } from '../core/errors'
 import { Eip1193Executor } from './eip1193'
 import { MulticallResolver } from './resolver'
@@ -61,8 +61,13 @@ function isEip1193Provider(entry: Eip1193Provider | StepExecutor): entry is Eip1
  * legacy unbranded instances never checked/never throw — 1.0's "duplicate
  * stateless task in one array" pattern stays supported) — just widened to
  * treat the flattened, cross-chain plan as one array instead of one chain's.
+ * The "is this branded?" check itself is `isSingleUseTask` from
+ * `src/core/internal.ts` — shared with `rejectDuplicateInstances`/
+ * `markTasksConsumed`, not re-implemented here (external review, P2), so this
+ * scan and the single-chain runners' own guard can never drift on what
+ * counts as "branded."
  *
- * Consumes nothing: this only reads `[SINGLE_USE]`, it never marks anything
+ * Consumes nothing: this only READS the brand, it never marks anything
  * consumed — every task in `plan`, including the two colliding instances
  * themselves, remains fully resubmittable after this throws.
  */
@@ -72,7 +77,7 @@ function assertNoFlattenedDuplicates<T>(plan: Record<number, MultistepTask<T>[]>
     const chainId = Number(key)
     const tasks = plan[chainId] ?? []
     for (const t of tasks) {
-      if (!(t as MultistepTask<T> & SingleUseCarrier)[SINGLE_USE]) continue
+      if (!isSingleUseTask(t)) continue
       seen ??= new Set()
       if (seen.has(t)) {
         throw new DominoTaskReuseError(
@@ -228,6 +233,21 @@ export class MultichainResolver {
    * before the `Promise.all` below), so a sibling settling AFTER the
    * rejection has already propagated can never surface as a Node
    * `unhandledRejection`.
+   *
+   * **Why each call is wrapped in `Promise.resolve().then(...)` (external
+   * review, P1):** `executor.getBlockNumber` is typed as returning a
+   * `Promise`, but nothing stops a non-conforming custom `StepExecutor` from
+   * implementing it as a plain (non-`async`) function that throws
+   * SYNCHRONOUSLY instead. Calling it directly inside the `.map()` below
+   * would let that throw abort the `.map()` call itself mid-iteration —
+   * discarding whatever promise(s) EARLIER iterations already created, with
+   * no handler ever attached to them (a real, reproduced unhandled-rejection
+   * hazard when an earlier chain's own promise later rejects, not a
+   * hypothetical). Deferring the actual call into a microtask means `.map()`
+   * itself can never throw — every iteration unconditionally produces a
+   * promise (whose eventual rejection, sync-throw or async, is then
+   * capturable) before any of them has actually run, so the `.catch(noop)`
+   * loop below always reaches every one.
    */
   async snapshot(): Promise<Record<number, bigint>> {
     const chainIds = this.#chainIds
@@ -242,7 +262,7 @@ export class MultichainResolver {
       }
     }
 
-    const pending = executors.map((executor) => executor.getBlockNumber!())
+    const pending = executors.map((executor) => Promise.resolve().then(() => executor.getBlockNumber!()))
     for (const p of pending) p.catch(() => {})
 
     const values = await Promise.all(pending)
