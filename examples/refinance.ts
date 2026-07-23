@@ -4,7 +4,14 @@
  *
  * Checked in CI against the BUILT dist types, exactly like `docs/snippets/*`
  * (see `scripts/check-snippets.ts`) — that type-check is the merge gate.
- * Live execution is gated behind `RPC_URL` (see `main()` at the bottom).
+ * `main()` only runs on DIRECT execution (`tsx examples/refinance.ts`), never
+ * merely on import — see the guard at the bottom of this file — and `main()`
+ * itself validates `RPC_URL` (helpful error + non-zero exit when absent).
+ * These are two independent checks on purpose: `RPC_URL`-presence ALONE is
+ * not a safe import guard (a process that happens to have `RPC_URL` set —
+ * e.g. this file imported from a live-fork test suite — would otherwise
+ * fire a real run, `process.exit` included, as a side effect of importing
+ * it), and direct-execution ALONE doesn't validate the env var either.
  *
  * What this demonstrates, end to end:
  *   1. `defineTask` + human-readable ABI (F3) + `t.derive` (F2) — Aave v3 and
@@ -35,6 +42,7 @@
  * addresses used only by the optional multichain variant.
  */
 
+import { fileURLToPath } from 'node:url'
 import { createPublicClient, http } from 'viem'
 import { mainnet, base } from 'viem/chains'
 import {
@@ -418,12 +426,22 @@ async function main(): Promise<void> {
   console.log('\nDone.\n')
 }
 
-// Mirrors scripts/benchmark-live.ts's guard style (missing RPC_URL -> helpful
-// message + exit(1)), but the guard wraps the INVOCATION itself, not just
-// main()'s internal check — so importing this module (from the snippet-CI
-// type-check pass, or from src/__tests__/refinance-example.test.ts) never
-// dispatches a real RPC call or calls process.exit.
-if (process.env['RPC_URL']) {
+// external review, P2: `RPC_URL`-presence is NOT a safe import guard — a
+// process that happens to have `RPC_URL` set (e.g. this module imported
+// from a live-fork test suite, or any other consumer) would otherwise fire
+// a real run — `process.exit` included — as a side effect of merely
+// importing it. The real guard is DIRECT EXECUTION: `main()` only runs when
+// this file is the process's actual entry point (`tsx examples/refinance.ts`
+// / `node examples/refinance.js`), detected by comparing this module's own
+// URL to `process.argv[1]` (the script Node/tsx was invoked with) via
+// `fileURLToPath` — never merely on import, regardless of what's in the
+// environment. `RPC_URL` itself is validated INSIDE `main()` (helpful error
+// + non-zero exit when absent — mirrors scripts/benchmark-live.ts's guard
+// style), independently of this direct-execution check.
+const isDirectExecution =
+  process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]
+
+if (isDirectExecution) {
   void main().catch((err: unknown) => {
     console.error('\nFatal error:', err instanceof Error ? err.message : err)
     process.exit(1)

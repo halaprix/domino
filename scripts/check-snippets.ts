@@ -206,6 +206,58 @@ function discoverExampleFiles(): string[] {
   return listFiles(join(ROOT, 'examples'), '.ts')
 }
 
+// ─── Release-gate example discovery guard (external review, P1) ───────────
+//
+// `discoverExampleFiles` (→ `listFiles`) silently returns `[]` for a
+// missing/unreadable `examples/` dir — without an explicit check, this
+// script could exit 0 while a release-gate example (G2's
+// `examples/refinance.ts`) was silently never type-checked at all. Two hard
+// failures, checked after materialization:
+//   1. generic: `examples/` exists as a directory but yielded zero `.ts`
+//      files (catches permission issues, an accidentally-emptied dir, a
+//      `discoverExampleFiles`/`listFiles` regression, etc.) — any future
+//      example added under `examples/` gets this same safety net for free.
+//   2. specific: every file in `REQUIRED_EXAMPLE_FILES` (currently just
+//      G2's `refinance.ts`) must be present in the manifest BY NAME — the
+//      generic check alone would stay silent if some OTHER unrelated file
+//      happened to be discovered while the actual release-gate example was
+//      missing (e.g. renamed or deleted by mistake).
+
+const REQUIRED_EXAMPLE_FILES = ['refinance.ts'] as const
+
+function assertExamplesDiscovered(manifest: Manifest[]): void {
+  const examplesDir = join(ROOT, 'examples')
+
+  let dirExists = false
+  try {
+    dirExists = statSync(examplesDir).isDirectory()
+  } catch {
+    dirExists = false
+  }
+
+  const discoveredExampleFiles = manifest
+    .map((m) => m.sourceFile)
+    .filter((f) => f.startsWith(`examples${sep}`) || f.startsWith('examples/'))
+
+  if (dirExists && discoveredExampleFiles.length === 0) {
+    throw new Error(
+      'examples/ directory exists but yielded zero .ts files for snippet discovery — ' +
+        'check discoverExampleFiles()/listFiles() permissions, or whether the directory is genuinely empty.',
+    )
+  }
+
+  for (const name of REQUIRED_EXAMPLE_FILES) {
+    const expected = relPath(join(examplesDir, name))
+    if (!discoveredExampleFiles.includes(expected)) {
+      throw new Error(
+        `release-gate example missing from snippet discovery: "${expected}" was not found — ` +
+          'this file is supposed to be type-checked against the built dist types on every run ' +
+          '(same gate as docs/snippets/*); its absence here means that gate silently did not run.',
+      )
+    }
+  }
+}
+
 // ─── Materialization ────────────────────────────────────────────────────────
 
 function relPath(p: string): string {
@@ -458,6 +510,11 @@ function main(): void {
     }
     console.log('')
   }
+
+  // External review, P1: fails loudly (before tsc even runs) if the
+  // release-gate example(s) weren't actually discovered above — see
+  // `assertExamplesDiscovered`'s doc comment.
+  assertExamplesDiscovered(manifest)
 
   console.log('── src/ escape check ──')
   const srcEscapes = findSrcEscapes(manifest)
