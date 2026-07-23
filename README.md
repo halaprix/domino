@@ -57,7 +57,10 @@ const erc4626Abi = [
 const vaultAddress = "0x1234567890123456789012345678901234567890" as Address
 const ownerAddress = "0x0987654321098765432109876543210987654321" as Address
 
-type VaultResult = { balance: bigint; assets: bigint | undefined }
+type VaultResult = { balance: bigint | undefined; assets: bigint | undefined }
+
+// Closure context: step 2 depends on step 1's results
+const ctx: { balance?: bigint; assets?: bigint } = {}
 
 const task: MultistepTask<VaultResult> = {
   maxStep: 2,
@@ -69,30 +72,37 @@ const task: MultistepTask<VaultResult> = {
       ]
     }
     if (step === 2) {
-      // Step 2 uses the balance from step 1 (we'd have it in the context at this point)
+      // Skip step 2 if we didn't get a balance from step 1
+      if (ctx.balance === undefined) return []
       return [
-        { key: "assets", target: vaultAddress, abi: erc4626Abi, functionName: "convertToAssets", args: [1000n] },
+        { key: "assets", target: vaultAddress, abi: erc4626Abi, functionName: "convertToAssets", args: [ctx.balance] },
       ]
     }
     return []
   },
 
-  consumeStepResults(_step, results: StepResult[]) {
-    // Tasks collect and route results internally
+  consumeStepResults(step, results: StepResult[]) {
+    // Route results by step: store them in ctx for next step
     for (const r of results) {
       if (r.status === 'success') {
-        // Use r.key and r.value as needed
+        if (step === 1 && r.key === 'balance') {
+          ctx.balance = r.value as bigint
+        }
+        if (step === 2 && r.key === 'assets') {
+          ctx.assets = r.value as bigint
+        }
       }
     }
   },
 
   finalize() {
-    return { balance: 1000n, assets: 2000n }
+    return { balance: ctx.balance, assets: ctx.assets }
   },
 }
 
 const [result] = await runMultistepTasks(executor, [task])
-// result.balance = 1000n, result.assets = 2000n
+// result.balance: balanceOf output from step 1
+// result.assets: convertToAssets(balance) output from step 2
 ```
 
 That's the whole API — one `MultistepTask` per entity, batched into one `runMultistepTasks` call. Two pages — read the source of [`erc4626.ts`](src/handlers/erc4626.ts) if you want to see a production example.
@@ -177,7 +187,7 @@ Works with `blockHash`, `blockTag`, or `blockNumber`. Even on chains where Multi
 | `buildErc4626Task()` | Build a task definition for ERC4626 vault reads |
 | `resolveErc20Token()` | One-shot ERC20: `{ symbol, decimals, balance }` |
 | `resolveErc4626Vault()` | One-shot ERC4626: `{ metadata: { symbol, decimals, ... }, position?: { balance, assets } }` |
-| `BlockParam` | `{ blockNumber?, blockTag?, blockHash? }` |
+| `BlockParam` | `{ blockNumber } \| { blockTag } \| { blockHash }` (one of three) |
 
 ## Documentation
 
