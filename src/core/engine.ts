@@ -59,11 +59,30 @@
  * reaches all of them too. Perf: `dedupeKeyFor` is only ever called when
  * `options.dedupe` is true (see the call-collection loop below) — the
  * default path never computes a key at all.
+ *
+ * **Per-subscriber error identity (external review, P2):** a shared failure
+ * is never hung on the exact same `DominoCallError` OBJECT for two or more
+ * subscribers — that object's own `.key` field would then read as whichever
+ * subscriber's call happened to be the wire representative, wrong for every
+ * OTHER subscriber reading it off their own `StepResult`. When an entry has
+ * more than one subscriber, each gets its OWN `DominoCallError` instance —
+ * same `message`/`kind`/`data`/`target`/`functionName`/`cause` (the cause
+ * REFERENCE is shared, never re-wrapped — it's still "the one transport/
+ * revert failure", just described once per recipient), `key` set to THAT
+ * subscriber's own routing key. A single-subscriber entry (the overwhelming
+ * common case — dedup off, or a merge of exactly nobody-else) keeps routing
+ * the original object untouched, so identity pins elsewhere in the codebase
+ * (e.g. bisection's error-identity determinism tests) are unaffected. A
+ * non-`DominoCallError` failure (a custom `StepExecutor` resolving a
+ * `RawResult` failure with some other thrown value, which carries no `.key`
+ * field to begin with) is always shared as-is — there is no per-call
+ * metadata on it to correct.
  */
 
 import type { MultistepTask, StepCall, StepResult, RawResult } from './types'
 import { runBatchPool } from './pool'
 import { dedupeKeyFor } from './dedupe'
+import { DominoCallError } from './errors'
 
 /**
  * The hooks that fully capture `run` vs `runSettled`'s divergence — 3 as of
@@ -144,6 +163,25 @@ export interface StepEngineOptions {
  *  dedup actually merged two or more subscribers into this entry. */
 interface WireMappingEntry {
   subscribers: { taskIndex: number; key: string }[]
+}
+
+/**
+ * A fresh `DominoCallError` describing the SAME failure as `original`, but
+ * addressed to `key` — see the module doc's "Per-subscriber error identity"
+ * section. `cause` is passed through as the SAME reference (never re-wrapped
+ * — `original.cause`, not `original`), so every clone of one merged failure
+ * still shares one underlying transport/revert cause identity even though
+ * each now has its own wrapper object and its own `key`.
+ */
+function retargetError(original: DominoCallError, key: string): DominoCallError {
+  return new DominoCallError(original.message, {
+    kind: original.kind,
+    ...(original.data !== undefined ? { data: original.data } : {}),
+    ...(original.target !== undefined ? { target: original.target } : {}),
+    ...(original.functionName !== undefined ? { functionName: original.functionName } : {}),
+    ...(original.cause !== undefined ? { cause: original.cause } : {}),
+    key,
+  })
 }
 
 /**
@@ -249,18 +287,31 @@ export async function runSteps<TResult>(
           // so every subscriber of a merged group sees the same outcome. A
           // non-merged call's entry has exactly one subscriber, so this
           // degrades to the pre-F7 single-route behavior identically.
+          const failureError = result.status === 'failure' && 'error' in result ? result.error : undefined
+          const isSharedFailure = failureError !== undefined && mappingEntry.subscribers.length > 1
+
           for (const { taskIndex, key } of mappingEntry.subscribers) {
             const list = perTaskResults[taskIndex]!
             if (result.status === 'success') {
               list.push({ status: 'success', key, value: result.value })
             } else {
-              // Forward the SAME error object — never wrap or discard it.
-              // exactOptionalPropertyTypes-safe: only include `error` when
-              // the RawResult actually carried one.
+              // Per-subscriber error identity (external review, P2): a
+              // failure shared by more than one subscriber never hands out
+              // the SAME `DominoCallError` object twice — each subscriber
+              // gets its own instance addressed to ITS OWN key (see
+              // `retargetError` / the module doc's "Per-subscriber error
+              // identity" section). A single-subscriber entry (the default,
+              // dedup-off path) forwards the original object completely
+              // unchanged — exactOptionalPropertyTypes-safe: only include
+              // `error` when the RawResult actually carried one.
+              const error =
+                isSharedFailure && failureError instanceof DominoCallError
+                  ? retargetError(failureError, key)
+                  : failureError
               list.push({
                 status: 'failure',
                 key,
-                ...('error' in result && result.error !== undefined ? { error: result.error } : {}),
+                ...(error !== undefined ? { error } : {}),
               })
             }
           }

@@ -138,6 +138,59 @@ describe('F7 dedup — conflicting output ABIs never merge (spec corruption test
     expect((resultA as { v: unknown }).v).toBe(42n)
     expect((resultB as { v: unknown }).v).toEqual([42n, 43n])
   })
+
+  it('external review (P1) regression: overloads with the same output MULTISET but different input->output pairing never merge', async () => {
+    // ABI A: f(uint256) -> uint256, f(address) -> bool
+    // ABI B: f(address) -> uint256, f(uint256) -> bool
+    // Same two output SHAPES in both ABIs (uint256, bool) — only the pairing
+    // with inputs differs. The old arity-based fallback (both overloads take
+    // exactly 1 input, so arity alone never disambiguated) serialized ALL
+    // same-arity candidates' outputs together, in ABI order — producing an
+    // IDENTICAL combined signature for A and B regardless of pairing, so
+    // this scenario used to merge and silently hand taskB back taskA's
+    // uint256 decode (or vice versa). Selector-based resolution (current
+    // implementation) recovers the exact matched overload per ABI, so the
+    // two calls key differently and must never merge.
+    const abiOverloadA = [
+      { type: 'function', name: 'f', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'uint256' }] },
+      { type: 'function', name: 'f', stateMutability: 'view', inputs: [{ type: 'address' }], outputs: [{ type: 'bool' }] },
+    ] as const
+    const abiOverloadB = [
+      { type: 'function', name: 'f', stateMutability: 'view', inputs: [{ type: 'address' }], outputs: [{ type: 'uint256' }] },
+      { type: 'function', name: 'f', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'bool' }] },
+    ] as const
+
+    const invocations: StepCall[][] = []
+    const executor: StepExecutor = {
+      async executeMulticall(calls: StepCall[]): Promise<RawResult[]> {
+        invocations.push(calls.map((c) => ({ ...c })))
+        return calls.map((c): RawResult =>
+          c.abi === abiOverloadA ? { status: 'success', value: 111n } : { status: 'success', value: true },
+        )
+      },
+    }
+
+    // Both call `f` with a uint256 arg -> resolves to the `f(uint256)`
+    // overload in EACH abi -> IDENTICAL calldata (a selector is fixed by a
+    // function's own name+input-types alone, independent of which ABI array
+    // declares it or what its sibling overloads are) — but `f(uint256)`
+    // means uint256-out in ABI A and bool-out in ABI B.
+    const taskA = defineTask((t) => ({
+      v: t.call({ target: ADDR, abi: abiOverloadA, functionName: 'f', args: [1n] }),
+    }))
+    const taskB = defineTask((t) => ({
+      v: t.call({ target: ADDR, abi: abiOverloadB, functionName: 'f', args: [1n] }),
+    }))
+
+    const [resultA, resultB] = await runMultistepTasks(executor, [taskA, taskB] as MultistepTask<unknown>[], {
+      dedupe: true,
+    })
+
+    expect(invocations).toHaveLength(1)
+    expect(invocations[0]).toHaveLength(2) // must NOT merge
+    expect((resultA as { v: unknown }).v).toBe(111n)
+    expect((resultB as { v: unknown }).v).toBe(true)
+  })
 })
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -156,6 +209,47 @@ describe('F7 dedup — case-insensitive target merge', () => {
 
     expect(invocations()).toHaveLength(1)
     expect(invocations()[0]).toHaveLength(1)
+    expect(resultA!.v).toBe(resultB!.v)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────
+// 3b. Calldata hex-case normalization (bytes/bytesN args).
+// ─────────────────────────────────────────────────────────────────────────
+
+describe('F7 dedup — calldata hex-case normalization (bytes/bytesN args)', () => {
+  it('external review (P2) regression: a bytes32 arg with the same VALUE but different hex-string casing still merges under dedupe: true', async () => {
+    const bytesAbi = [
+      {
+        type: 'function',
+        name: 'getByHash',
+        stateMutability: 'view',
+        inputs: [{ name: 'h', type: 'bytes32' }],
+        outputs: [{ type: 'uint256' }],
+      },
+    ] as const
+
+    // Same bytes VALUE, different hex-string casing. viem's ABI encoder
+    // preserves a bytes/bytesN arg's casing verbatim in the resulting
+    // calldata (unlike an address, which is never checksum-cased in
+    // calldata to begin with) — confirmed empirically: encoding these two
+    // args produces byte-for-byte-equal calldata once lowercased, but
+    // DIFFERENT raw strings before that.
+    const mixedCaseHash = '0xaAbBaAbBaAbBaAbBaAbBaAbBaAbBaAbBaAbBaAbBaAbBaAbBaAbBaAbBaAbBaAbB' as `0x${string}`
+    const lowerCaseHash = mixedCaseHash.toLowerCase() as `0x${string}`
+
+    const { executor, invocations } = makeEchoExecutor()
+    const taskA = defineTask((t) => ({
+      v: t.call({ target: ADDR, abi: bytesAbi, functionName: 'getByHash', args: [mixedCaseHash] }),
+    }))
+    const taskB = defineTask((t) => ({
+      v: t.call({ target: ADDR, abi: bytesAbi, functionName: 'getByHash', args: [lowerCaseHash] }),
+    }))
+
+    const [resultA, resultB] = await runMultistepTasks(executor, [taskA, taskB], { dedupe: true })
+
+    expect(invocations()).toHaveLength(1)
+    expect(invocations()[0]).toHaveLength(1) // merged despite differing hex-string casing
     expect(resultA!.v).toBe(resultB!.v)
   })
 })
@@ -219,7 +313,7 @@ describe('F7 dedup — dedupe: false per-call override', () => {
 // ─────────────────────────────────────────────────────────────────────────
 
 describe('F7 dedup — failure fan-out', () => {
-  it('a merged group whose wire call resolves with a plain per-call (revert-style) failure fans out to every subscriber (runSettled)', async () => {
+  it('a merged group whose wire call resolves with a plain per-call (revert-style) failure fans out to every subscriber, each with its OWN error instance (runSettled)', async () => {
     const revertError = new DominoCallError('reverted', { kind: 'revert', data: '0x' })
     const executor: StepExecutor = {
       async executeMulticall(calls: StepCall[]): Promise<RawResult[]> {
@@ -233,8 +327,57 @@ describe('F7 dedup — failure fan-out', () => {
 
     expect(settledA!.status).toBe('rejected')
     expect(settledB!.status).toBe('rejected')
-    expect((settledA as { status: 'rejected'; error: unknown }).error).toBe(revertError)
-    expect((settledB as { status: 'rejected'; error: unknown }).error).toBe(revertError)
+    const errA = (settledA as { status: 'rejected'; error: unknown }).error as DominoCallError
+    const errB = (settledB as { status: 'rejected'; error: unknown }).error as DominoCallError
+
+    // External review (P2): a merged group's failure is never the SAME
+    // `DominoCallError` object handed to two or more subscribers (its own
+    // `.key` would then read as whichever subscriber's call happened to be
+    // the wire representative) — each gets its OWN instance...
+    expect(errA).not.toBe(revertError)
+    expect(errB).not.toBe(revertError)
+    expect(errA).not.toBe(errB)
+    // ...but describing the exact same underlying failure: same kind/data.
+    expect(errA.kind).toBe('revert')
+    expect(errB.kind).toBe('revert')
+    expect(errA.data).toBe('0x')
+    expect(errB.data).toBe('0x')
+  })
+
+  it('merged failure fan-out: each subscriber gets its OWN routing key on its own error clone (metadata regression, external review P2)', async () => {
+    // taskA has an extra LEADING call so its shared call lands at internal
+    // key "1" — taskB's shared call (its only call) is key "0". Distinct
+    // keys make the per-subscriber `.key` assertion below meaningful,
+    // instead of the two subscriber keys coincidentally matching.
+    const DUMMY_ADDR = '0x4444444444444444444444444444444444444444' as Address
+    const revertError = new DominoCallError('reverted', { kind: 'revert', data: '0x' })
+    const executor: StepExecutor = {
+      async executeMulticall(calls: StepCall[]): Promise<RawResult[]> {
+        return calls.map((c): RawResult =>
+          c.target.toLowerCase() === ADDR.toLowerCase()
+            ? { status: 'failure', error: revertError }
+            : { status: 'success', value: 'dummy-ok' },
+        )
+      },
+    }
+
+    const taskA = defineTask((t) => {
+      t.call({ target: DUMMY_ADDR, abi: testAbi, functionName: 'getVal', args: [0n] }) // internal key "0"
+      const v = t.call({ target: ADDR, abi: testAbi, functionName: 'getVal', args: [1n] }) // internal key "1"
+      return { v }
+    })
+    const taskB = defineTask((t) => ({ v: t.call({ target: ADDR, abi: testAbi, functionName: 'getVal', args: [1n] }) })) // internal key "0"
+
+    const [settledA, settledB] = await runSettled(executor, [taskA, taskB], { dedupe: true })
+
+    expect(settledA!.status).toBe('rejected')
+    expect(settledB!.status).toBe('rejected')
+    const errA = (settledA as { status: 'rejected'; error: unknown }).error as DominoCallError
+    const errB = (settledB as { status: 'rejected'; error: unknown }).error as DominoCallError
+
+    expect(errA.key).toBe('1') // taskA's shared call, NOT the representative's own key
+    expect(errB.key).toBe('0') // taskB's shared call
+    expect(errA).not.toBe(errB)
   })
 
   it('a merged group whose wire call becomes a bisection TERMINAL (transport rejection) fans the same synthesized failure out to every subscriber (runSettled)', async () => {
@@ -271,13 +414,18 @@ describe('F7 dedup — failure fan-out', () => {
 
     expect(settledA!.status).toBe('rejected')
     expect(settledB!.status).toBe('rejected')
-    const errA = (settledA as { status: 'rejected'; error: unknown }).error
-    const errB = (settledB as { status: 'rejected'; error: unknown }).error
+    const errA = (settledA as { status: 'rejected'; error: unknown }).error as DominoCallError
+    const errB = (settledB as { status: 'rejected'; error: unknown }).error as DominoCallError
     expect(errA).toBeInstanceOf(DominoCallError)
-    expect((errA as DominoCallError).kind).toBe('batch')
-    // SAME synthesized error object fanned out to both subscribers of the
-    // merged group — not two independently-constructed-but-equal errors.
-    expect(errA).toBe(errB)
+    expect(errA.kind).toBe('batch')
+    expect(errB.kind).toBe('batch')
+    // External review (P2): each subscriber gets its OWN `DominoCallError`
+    // instance (not the SAME object) — but both wrap the identical
+    // underlying transport error as `cause`, since it's still "the one
+    // failure", just described once per recipient.
+    expect(errA).not.toBe(errB)
+    expect(errA.cause).toBeDefined()
+    expect(errA.cause).toBe(errB.cause)
 
     expect(settledC1!.status).toBe('fulfilled')
     expect(settledC2!.status).toBe('fulfilled')

@@ -34,7 +34,7 @@
 
 import type { Abi, AbiFunction } from 'abitype'
 import type { StepCall } from './types'
-import { encodeFunctionData } from './abi'
+import { encodeFunctionData, toFunctionSelector } from './abi'
 import { DEDUPE_ELIGIBLE } from './internal'
 
 /**
@@ -77,45 +77,52 @@ export function isDedupeEligible(call: StepCall): boolean {
 }
 
 /**
- * ABI function items matching `functionName`, narrowed by input arity when
- * that narrows to exactly one candidate — a lightweight mirror of how viem's
- * own overload resolution disambiguates by argument count/shape. When arity
- * does NOT narrow to a single candidate (zero matches, e.g. a mismatched
- * call that will fail downstream anyway, or more than one same-arity
- * overload — genuinely ambiguous without inspecting argument VALUE types),
- * this deliberately returns every same-named candidate instead of guessing:
- * `canonicalOutputSignature` below then keys on ALL of their outputs
- * together, so two calls that could plausibly resolve to different
- * overloads never spuriously merge just because one candidate's outputs
- * happen to coincide.
+ * The ABI function item that `calldata` was ACTUALLY encoded against —
+ * resolved by SELECTOR, not by name+arity (external review, P1: arity alone
+ * cannot disambiguate two same-arity overloads, e.g. `f(uint256)` and
+ * `f(address)` both take exactly one input; the old arity-based fallback
+ * conflated such overloads' outputs together, which could produce IDENTICAL
+ * serialized signatures for two ABIs that pair inputs to outputs
+ * differently — exactly the corruption the key exists to prevent).
+ *
+ * A function selector is the first 4 bytes of `keccak256(signature)`, fixed
+ * by the function's OWN name+input-types alone — never by which ABI array
+ * it's declared in, nor by that ABI's OTHER overloads. Since `calldata` was
+ * produced by `encodeFunctionData` from this exact `(abi, functionName,
+ * args)` triple, its first 4 bytes are the selector of whichever single
+ * item `encodeFunctionData` actually resolved `functionName`/`args` to —
+ * finding the same-named candidate whose OWN computed selector matches
+ * therefore recovers that EXACT item, unambiguously, with no arity
+ * heuristic and no risk of conflating two overloads' outputs.
+ *
+ * Returns `undefined` if no same-named candidate's selector matches (should
+ * not happen given `calldata` was just encoded from this same abi, but
+ * handled defensively — see `dedupeKeyFor`'s catch-all "never merge"
+ * fallback).
  */
-function candidateFunctions(abi: Abi, functionName: string, argsLength: number): AbiFunction[] {
-  const sameName = abi.filter(
-    (item): item is AbiFunction => item.type === 'function' && item.name === functionName,
-  )
-  const arityMatches = sameName.filter((item) => item.inputs.length === argsLength)
-  return arityMatches.length === 1 ? arityMatches : sameName
+function matchedFunctionFor(abi: Abi, functionName: string, calldata: `0x${string}`): AbiFunction | undefined {
+  const selector = calldata.slice(0, 10).toLowerCase()
+  for (const item of abi) {
+    if (item.type !== 'function' || item.name !== functionName) continue
+    if (toFunctionSelector(item).toLowerCase() === selector) return item
+  }
+  return undefined
 }
 
-/**
- * `JSON.stringify(matchedItem.outputs?.map(canon) ?? [])` per the spec, for
- * the unambiguous (single-candidate) case. For the ambiguous case (see
- * `candidateFunctions` above), serializes every candidate's own
- * `outputs.map(canon)` list, in ABI order — documented choice, not the
- * spec's literal formula (which assumes one matched item).
- */
-function canonicalOutputSignature(candidates: AbiFunction[]): string {
-  if (candidates.length === 1) {
-    return JSON.stringify(candidates[0]!.outputs?.map(canon) ?? [])
-  }
-  return JSON.stringify(candidates.map((item) => item.outputs?.map(canon) ?? []))
+/** `JSON.stringify(matchedItem.outputs?.map(canon) ?? [])` per the spec —
+ *  now always the true single matched item (see `matchedFunctionFor`), so
+ *  this is exactly the spec's literal formula with no ambiguous-fallback
+ *  branch needed. */
+function canonicalOutputSignature(matched: AbiFunction): string {
+  return JSON.stringify(matched.outputs?.map(canon) ?? [])
 }
 
 /**
  * Dedup key for `call`, or `undefined` when it must never be merged with
- * anything (see the module doc's "Eligibility" section for both reasons).
- * Callers (`src/core/engine.ts`) treat `undefined` identically regardless of
- * WHICH reason produced it: the call simply gets its own wire-list entry.
+ * anything (see the module doc's "Eligibility" section for both reasons,
+ * plus `matchedFunctionFor`'s defensive `undefined` case). Callers
+ * (`src/core/engine.ts`) treat `undefined` identically regardless of WHICH
+ * reason produced it: the call simply gets its own wire-list entry.
  */
 export function dedupeKeyFor(call: StepCall): string | undefined {
   if (!isDedupeEligible(call)) return undefined
@@ -128,10 +135,19 @@ export function dedupeKeyFor(call: StepCall): string | undefined {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       args: call.args as any,
     })
-    const candidates = candidateFunctions(call.abi, call.functionName, call.args?.length ?? 0)
-    if (candidates.length === 0) return undefined
-    const signature = canonicalOutputSignature(candidates)
-    return JSON.stringify([call.target.toLowerCase(), calldata, signature])
+    const matched = matchedFunctionFor(call.abi, call.functionName, calldata)
+    if (!matched) return undefined
+    const signature = canonicalOutputSignature(matched)
+    // External review (P2): lowercase `calldata` itself before keying — a
+    // `bytes`/`bytesN` arg's ENCODED segment preserves the caller's own hex
+    // casing verbatim (unlike an `address`, which viem/Solidity ABI-encodes
+    // without checksum casing to begin with), so two calls with the same
+    // bytes VALUE but different hex-string casing (`0xaAbB` vs `0xaabb`)
+    // would otherwise key differently despite being byte-for-byte identical
+    // calldata. Only the KEY is normalized here — the call's own `calldata`
+    // value (and whatever the executor actually sends on the wire) is
+    // completely untouched.
+    return JSON.stringify([call.target.toLowerCase(), calldata.toLowerCase(), signature])
   } catch {
     return undefined
   }
