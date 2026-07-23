@@ -48,7 +48,7 @@ import { DominoTaskReuseError } from './errors'
  * that happened to define this symbol itself would be an abuse of an
  * internal implementation detail, not a supported way to opt in.
  */
-export const SINGLE_USE: unique symbol = Symbol('domino.su')
+export const SINGLE_USE: unique symbol = Symbol('domino.singleUse')
 
 /** Structural type for a task carrying the single-use brand. Consumers never
  *  see this type — it's an internal intersection used only where a compiled
@@ -67,12 +67,6 @@ const consumed = new WeakSet<object>()
  *  time, so using it at 3 call sites (instead of a real `isBranded()`
  *  function) costs zero extra runtime bytes over one. */
 type Branded<T> = MultistepTask<T> & SingleUseCarrier
-
-/** Shared idiom text — referenced (not inlined) by both `DominoTaskReuseError`
- *  sites below so the bundle stores it once. States the idiom required by
- *  spec: these tasks are single-run, and the fix is always to create a
- *  fresh one (per run — one instance, one run). */
-const IDIOM = 'single-run — create a fresh one'
 
 /**
  * Pipeline step 1 — the existing `batchSize` validation (message/behavior
@@ -100,8 +94,12 @@ export function validateOptions(batchSize: number | undefined): number {
  */
 export function rejectDuplicateInstances<T>(ts: MultistepTask<T>[]): void {
   for (let i = 0; i < ts.length; i++) {
-    if ((ts[i] as Branded<T>)[SINGLE_USE] && ts.indexOf(ts[i]!, i + 1) !== -1)
-      throw new DominoTaskReuseError(`Duplicate — ${IDIOM}`)
+    if ((ts[i] as Branded<T>)[SINGLE_USE] && ts.indexOf(ts[i]!, i + 1) !== -1) {
+      throw new DominoTaskReuseError(
+        'Same task instance passed twice in one submission: domino tasks are single-run — ' +
+          'create a fresh task for each entry',
+      )
+    }
   }
 }
 
@@ -131,8 +129,15 @@ export function validatePinCapability(): void {
  * rather than at the first executor call.
  */
 export function markTasksConsumed<T>(ts: MultistepTask<T>[]): void {
-  for (const t of ts)
-    if ((t as Branded<T>)[SINGLE_USE] && consumed.has(t)) throw new DominoTaskReuseError(`Reused — ${IDIOM}`)
+  for (const t of ts) {
+    if ((t as Branded<T>)[SINGLE_USE] && consumed.has(t)) {
+      throw new DominoTaskReuseError(
+        'Task instance already consumed: domino tasks are single-run — create a fresh task ' +
+          'for each run (factories such as buildErc20Task/defineTask return a fresh instance ' +
+          'per call)',
+      )
+    }
+  }
   for (const t of ts) if ((t as Branded<T>)[SINGLE_USE]) consumed.add(t)
 }
 
