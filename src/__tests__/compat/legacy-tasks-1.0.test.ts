@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { runMultistepTasks } from '../../index'
-import type { MultistepTask, StepExecutor, StepCall, StepResult } from '../../index'
+import type { MultistepTask, StepExecutor, StepCall, StepResult, RawResult } from '../../index'
 
 /**
  * 1.0-consumer compat — do not modernize these tests; they must keep passing on every 1.x release.
@@ -17,7 +17,7 @@ describe('Legacy hand-written MultistepTask with closure context', () => {
     let capturedBalance: bigint | undefined
 
     const mockExecutor: StepExecutor = {
-      async executeMulticall(calls: StepCall[]): Promise<any[]> {
+      async executeMulticall(calls: StepCall[]): Promise<RawResult[]> {
         // Step 1 returns balance
         if (calls[0]?.key === 'balance') {
           return [{ status: 'success', value: 1000n }]
@@ -74,7 +74,7 @@ describe('Legacy hand-written MultistepTask with closure context', () => {
     // This test pins that 1.0 allows it (even if it's not recommended)
 
     const mockExecutor: StepExecutor = {
-      async executeMulticall(_calls: StepCall[]): Promise<any[]> {
+      async executeMulticall(_calls: StepCall[]): Promise<RawResult[]> {
         return [{ status: 'success', value: 'CONSTANT' }]
       },
     }
@@ -114,7 +114,7 @@ describe('Legacy hand-written MultistepTask with closure context', () => {
 describe('Hand-written task run via runMultistepTasks directly', () => {
   it('routes results correctly with manual key-based result assignment', async () => {
     const mockExecutor: StepExecutor = {
-      async executeMulticall(_calls: StepCall[]): Promise<any[]> {
+      async executeMulticall(_calls: StepCall[]): Promise<RawResult[]> {
         return [
           { status: 'success', value: 'TOK1' },
           { status: 'success', value: 18 },

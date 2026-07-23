@@ -5,7 +5,7 @@ import {
   resolveErc4626Vault,
   resolveErc4626VaultsBulk,
 } from '../../index'
-import type { StepExecutor, RawResult, Address } from '../../index'
+import type { StepExecutor, RawResult, StepResult, Address } from '../../index'
 
 /**
  * 1.0-consumer compat — do not modernize these tests; they must keep passing on every 1.x release.
@@ -16,7 +16,7 @@ import type { StepExecutor, RawResult, Address } from '../../index'
  * - All return shapes match v1.0 exactly
  */
 
-function mockExecutor(results: RawResult[][]): StepExecutor {
+function mockExecutor(results: RawResult[][]): { executeMulticall: ReturnType<typeof vi.fn> } {
   const fn = vi.fn()
   for (const batch of results) {
     fn.mockResolvedValueOnce(batch)
@@ -69,6 +69,47 @@ describe('resolveErc20Token', () => {
     expect(result.symbol).toBe('USDC')
     expect(result.decimals).toBe(6)
     expect(result.balance).toBeUndefined()
+  })
+
+  it('forwards block parameter to executor as second argument', async () => {
+    const executorMock = vi.fn().mockResolvedValueOnce([
+      { status: 'success', value: 'USDC' },
+      { status: 'success', value: 6n },
+    ])
+    const executor: StepExecutor = { executeMulticall: executorMock }
+
+    await resolveErc20Token({
+      client: executor,
+      token: USDC,
+      block: { blockNumber: 19_000_000n },
+    })
+
+    // Verify block was passed to executeMulticall as second argument
+    expect(executorMock).toHaveBeenNthCalledWith(
+      1,
+      expect.any(Array),
+      { blockNumber: 19_000_000n },
+    )
+  })
+
+  it('omits block parameter when not provided (defaults to undefined)', async () => {
+    const executorMock = vi.fn().mockResolvedValueOnce([
+      { status: 'success', value: 'USDC' },
+      { status: 'success', value: 6n },
+    ])
+    const executor: StepExecutor = { executeMulticall: executorMock }
+
+    await resolveErc20Token({
+      client: executor,
+      token: USDC,
+    })
+
+    // Verify block is undefined when not provided
+    expect(executorMock).toHaveBeenNthCalledWith(
+      1,
+      expect.any(Array),
+      undefined,
+    )
   })
 })
 
@@ -214,6 +255,77 @@ describe('resolveErc4626Vault', () => {
     expect(result.metadata.symbol).toBe('wstETH')
     expect(result.position?.balance).toBeUndefined()
     expect(result.position?.assets).toBeUndefined()
+  })
+
+  it('forwards block parameter through both step 1 and step 2', async () => {
+    const executorMock = vi.fn()
+    executorMock.mockResolvedValueOnce([
+      { status: 'success', value: 'wstETH' },
+      { status: 'success', value: 18n },
+      { status: 'success', value: asset },
+      { status: 'success', value: 500000000000000000n },
+      { status: 'success', value: 1000000000000000000n },
+      { status: 'success', value: 1000000000000000000n },
+    ])
+    executorMock.mockResolvedValueOnce([
+      { status: 'success', value: 501234567890123456n },
+    ])
+    const executor: StepExecutor = { executeMulticall: executorMock }
+
+    await resolveErc4626Vault({
+      client: executor,
+      vault,
+      owner,
+      block: { blockNumber: 19_000_000n },
+    })
+
+    // Verify block was passed for step 1
+    expect(executorMock).toHaveBeenNthCalledWith(
+      1,
+      expect.any(Array),
+      { blockNumber: 19_000_000n },
+    )
+    // Verify block was passed for step 2
+    expect(executorMock).toHaveBeenNthCalledWith(
+      2,
+      expect.any(Array),
+      { blockNumber: 19_000_000n },
+    )
+  })
+
+  it('omits block parameter in both steps when not provided', async () => {
+    const executorMock = vi.fn()
+    executorMock.mockResolvedValueOnce([
+      { status: 'success', value: 'wstETH' },
+      { status: 'success', value: 18n },
+      { status: 'success', value: asset },
+      { status: 'success', value: 500000000000000000n },
+      { status: 'success', value: 1000000000000000000n },
+      { status: 'success', value: 1000000000000000000n },
+    ])
+    executorMock.mockResolvedValueOnce([
+      { status: 'success', value: 501234567890123456n },
+    ])
+    const executor: StepExecutor = { executeMulticall: executorMock }
+
+    await resolveErc4626Vault({
+      client: executor,
+      vault,
+      owner,
+    })
+
+    // Verify block is undefined for step 1
+    expect(executorMock).toHaveBeenNthCalledWith(
+      1,
+      expect.any(Array),
+      undefined,
+    )
+    // Verify block is undefined for step 2
+    expect(executorMock).toHaveBeenNthCalledWith(
+      2,
+      expect.any(Array),
+      undefined,
+    )
   })
 })
 

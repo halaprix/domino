@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { MulticallResolver } from '../../index'
-import type { StepExecutor, RawResult } from '../../index'
+import type { StepExecutor, RawResult, StepCall, StepResult, Address } from '../../index'
 
 /**
  * 1.0-consumer compat — do not modernize these tests; they must keep passing on every 1.x release.
@@ -11,7 +11,7 @@ import type { StepExecutor, RawResult } from '../../index'
  * - `resolver.executor` getter returns the underlying executor
  */
 
-function mockExecutor(results: RawResult[][]): StepExecutor {
+function mockExecutor(results: RawResult[][]): { executeMulticall: ReturnType<typeof vi.fn> } {
   const fn = vi.fn()
   for (const batch of results) {
     fn.mockResolvedValueOnce(batch)
@@ -58,10 +58,10 @@ describe('MulticallResolver 1.0', () => {
           },
         ]
       },
-      consumeStepResults(_step: number, results: any[]) {
+      consumeStepResults(_step: number, results: StepResult[]) {
         for (const r of results) {
           if (r.status === 'failure') continue
-          if (r.key === 'symbol') ctx.symbol = r.value
+          if (r.key === 'symbol') ctx.symbol = r.value as string
           if (r.key === 'decimals') ctx.decimals = Number(r.value)
         }
       },
@@ -107,5 +107,73 @@ describe('MulticallResolver 1.0', () => {
 
     const [result] = await resolver.run([task])
     expect(result).toEqual({ value: 'result' })
+  })
+
+  it('forwards block parameter through run() to executor', async () => {
+    const executorMock = vi.fn().mockResolvedValueOnce([
+      { status: 'success', value: 'USDC' },
+    ])
+    const resolver = new MulticallResolver({ executeMulticall: executorMock })
+
+    const task = {
+      maxStep: 1,
+      buildStepCalls(step: number) {
+        if (step !== 1) return []
+        return [
+          {
+            key: 'symbol',
+            target: '0xA0b86991c6218b36c1d19D4a2e9Eb004C35d5Cc4' as Address,
+            abi: [],
+            functionName: 'symbol',
+          },
+        ]
+      },
+      consumeStepResults() {},
+      finalize() {
+        return {}
+      },
+    }
+
+    await resolver.run([task], { block: { blockNumber: 19_000_000n } })
+
+    expect(executorMock).toHaveBeenNthCalledWith(
+      1,
+      expect.any(Array),
+      { blockNumber: 19_000_000n },
+    )
+  })
+
+  it('omits block parameter when not provided in run() options', async () => {
+    const executorMock = vi.fn().mockResolvedValueOnce([
+      { status: 'success', value: 'USDC' },
+    ])
+    const resolver = new MulticallResolver({ executeMulticall: executorMock })
+
+    const task = {
+      maxStep: 1,
+      buildStepCalls(step: number) {
+        if (step !== 1) return []
+        return [
+          {
+            key: 'symbol',
+            target: '0xA0b86991c6218b36c1d19D4a2e9Eb004C35d5Cc4' as Address,
+            abi: [],
+            functionName: 'symbol',
+          },
+        ]
+      },
+      consumeStepResults() {},
+      finalize() {
+        return {}
+      },
+    }
+
+    await resolver.run([task])
+
+    expect(executorMock).toHaveBeenNthCalledWith(
+      1,
+      expect.any(Array),
+      undefined,
+    )
   })
 })
