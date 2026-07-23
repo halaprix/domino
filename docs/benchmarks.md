@@ -52,6 +52,56 @@ Benchmark measures network round-trips for various token/vault combinations. All
 - At batchSize ∞: always 2 round-trips (assuming vaults > 0)
 - At batchSize 100 (default): each 100 calls = 1 round-trip
 
+## Dedup Hit Rate (F7)
+
+`{ dedupe: true }` (or `Presets.throughput`, which bundles it with `maxConcurrentBatches`/`adaptiveBatching`) merges calls that share the same `(target, calldata, output shape)` **within one step, across tasks** — before batching/bisection ever sees the wire list. This is the same "same-token portfolio" shape as the round-trip table above, but the benefit compounds differently: two entries holding the *same* token no longer duplicate that token's `symbol()`/`decimals()`/`totalSupply()` calls at all, regardless of how many entries share it.
+
+**Same-token portfolio example** — a counting `StepExecutor` (counts calls actually received, never real RPCs) resolving 3 view calls per entry, entries spread evenly across a small set of distinct tokens:
+
+| Entries | Distinct tokens | Naive calls | Wire calls, `dedupe: true` | Hit rate |
+|---|---|---|---|---|
+| 100 | 10 | 300 | 30 | 90.0% |
+| 1,000 | 50 | 3,000 | 150 | 95.0% |
+
+Hit rate = `1 − (unique wire calls / naive calls)`. It tracks `1 − distinctTokens/entries` for this shape (repetition per token, not batch size) — the more entries share a token, the higher the hit rate, independent of `batchSize`.
+
+```ts
+import { createPublicClient, http } from "viem"
+import { mainnet } from "viem/chains"
+import { Eip1193Executor, defineTask, runMultistepTasks } from "@halaprix/domino"
+import type { Address } from "@halaprix/domino"
+
+const provider = createPublicClient({ chain: mainnet, transport: http() })
+const executor = new Eip1193Executor(provider)
+
+const erc20LikeAbi = [
+  { type: "function", name: "symbol", stateMutability: "view", inputs: [], outputs: [{ type: "string" }] },
+  { type: "function", name: "decimals", stateMutability: "view", inputs: [], outputs: [{ type: "uint8" }] },
+  { type: "function", name: "totalSupply", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+] as const
+
+// 100 portfolio entries, only 10 DISTINCT tokens among them — a realistic
+// shape: many holders/positions referencing the same small set of tokens.
+declare const portfolioTokens: Address[] // length 100, drawn from 10 distinct addresses
+
+const tasks = portfolioTokens.map((token) =>
+  defineTask((t) => ({
+    symbol: t.call({ target: token, abi: erc20LikeAbi, functionName: "symbol" }),
+    decimals: t.call({ target: token, abi: erc20LikeAbi, functionName: "decimals" }),
+    totalSupply: t.call({ target: token, abi: erc20LikeAbi, functionName: "totalSupply" }),
+  })),
+)
+
+// dedupe: true merges identical (target, calldata, output-shape) calls
+// within this one step, across all 100 tasks, BEFORE batching/bisection —
+// 300 naive calls collapse to 30 unique wire calls (90% hit rate).
+await runMultistepTasks(executor, tasks, { dedupe: true })
+```
+
+**Dedup eligibility is per-call, not per-run:** only calls built via `t.call` (a `TypedCallSpec`, eligible by default — opt out per call with `dedupe: false`) are ever merged. A hand-authored legacy `StepCall` carries no eligibility stamp and is never merged, `dedupe: true` or not — turning this option on can never change a legacy task's semantics.
+
+**Conflicting output ABIs never merge:** two subscribers declaring different output shapes for the identical calldata are always kept as separate wire calls (each decodes correctly against its own ABI) — dedup only merges calls that would also decode identically.
+
 ## Live Benchmark — Real RPC Timing
 
 The mock benchmark above measures RPC call-count reduction. The live benchmark measures **real wall time** and finds the **practical batchSize ceiling** for your specific RPC endpoint.

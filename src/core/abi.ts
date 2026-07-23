@@ -18,6 +18,7 @@ export {
   encodeAbiParameters,
   decodeAbiParameters,
   encodeDeployData,
+  toFunctionSelector,
 } from 'viem/utils'
 
 export { parseAbi } from 'viem'

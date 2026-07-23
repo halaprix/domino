@@ -13,6 +13,9 @@ export type {
 } from './core/types'
 export type { BatchOptions } from './core/runMultistepTasks'
 
+// Presets (F7) — off-the-shelf BatchOptions bundles
+export { Presets } from './core/presets'
+
 // Per-task settlement (F5)
 export { runSettled } from './core/runSettled'
 export type { TaskDiagnostics, SettledTaskResult } from './core/runSettled'
