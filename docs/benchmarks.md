@@ -13,10 +13,9 @@ const executor = new Eip1193Executor(provider)
 const resolver = new MulticallResolver(executor)
 ```
 
-| Package | Size (gzip) | Bundled |
+| Package | Size (gzip) | Notes |
 |---|---|---|
-| `@halaprix/domino` | 7.4 KB | ✓ |
-| viem (required) | your bundle | as peer dependency |
+| `@halaprix/domino` | 7.4 KB | viem is a hard dependency; installed with the package, not bundled into dist |
 
 ## Compared to Alternatives
 
@@ -31,6 +30,8 @@ const resolver = new MulticallResolver(executor)
 ## RPC Round-Trip Counts
 
 Benchmark measures network round-trips for various token/vault combinations. All scenarios assume **owner is present** (so balances and positions are queried). Table shows round-trips at two batch sizes: the default (100) and unlimited (all calls in one batch).
+
+**Run model:** All round-trip counts assume a single combined `runMultistepTasks` call that batches ERC20 tokens and ERC4626 vaults together (e.g., `resolver.run([...erc20Tasks, ...erc4626Tasks])`). This allows ERC20 calls to share step 1 batches with vault metadata calls. If you call `resolveErc20TokensBulk` and `resolveErc4626VaultsBulk` separately, each executes independently and may add round-trips.
 
 **Key insight:** With unlimited batchSize, most scenarios complete in **2 round-trips** (1 for ERC20 + vault metadata step, 1 for vault position step). At default batchSize of 100, larger scenarios require more round-trips due to call volume splitting.
 
@@ -57,7 +58,7 @@ The mock benchmark above measures RPC call-count reduction. The live benchmark m
 
 ### What it measures
 
-- **Batch-size sweep**: runs 50 ERC20 tokens (150 calls total: 50 × 3) at batchSizes of 10, 25, 50, 75, 100, 150, 200, and "all-in-one". Shows exactly where extra round-trips stop costing time.
+- **Batch-size sweep**: runs 50 ERC20 tokens (100 calls total: 50 × 2 symbol + decimals, no owner) at batchSizes of 10, 25, 50, 75, 100, 150, 200, and "all-in-one". Shows exactly where extra round-trips stop costing time.
 - **Limit probe**: sends a single Multicall3 call with 100, 200, 500, 1,000, 2,000, and 5,000 calls. Stops at first error. Tells you the practical ceiling for your RPC provider.
 
 ### How to run

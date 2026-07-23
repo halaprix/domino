@@ -192,8 +192,8 @@ Import the following directly from `@halaprix/domino`:
 - `MULTICALL3_ADDRESS: Address`
 - `MULTICALL3_BYTECODE: string`
 - `DEPLOYLESS_WRAPPER_BYTECODE: string`
-- `MULTICALL3_DEPLOYMENTS: Record<number, number>` — per-chain deployment block numbers
-- `shouldUseDeployless(chainId: number, blockNumber?: bigint): boolean`
+- `MULTICALL3_DEPLOYMENTS: Record<number, { blockCreated: bigint }>` — per-chain Multicall3 deployment info
+- `shouldUseDeployless(chainId: number, block?: BlockParam): boolean`
 - `buildErc20Task(params: { token: Address; owner?: Address }): MultistepTask<Erc20TokenResolution>`
 - `resolveErc20Token(params: { client: StepExecutor; token: Address; owner?: Address; block?: BlockParam }): Promise<Erc20TokenResolution>`
 - `resolveErc20TokensBulk(params: { client: StepExecutor; entries: { token: Address; owner?: Address }[]; batchSize?: number; block?: BlockParam }): Promise<Erc20TokenResolution[]>`
