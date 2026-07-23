@@ -156,11 +156,20 @@ export async function runSettled<TResult>(
   // `runSettled(executor, [], { batchSize: 0 })` rejects rather than
   // silently resolving to `[]` (unchanged 1.0 ordering — contrast with
   // `runMultistepTasks`, which checks the empty-tasks shortcut first).
-  const { batchSize, maxConcurrentBatches, adaptiveBatching, maxBatchAttempts, dedupe } = prepareRun(ts, options)
+  const { batchSize, maxConcurrentBatches, adaptiveBatching, maxBatchAttempts, dedupe } = prepareRun(
+    ts,
+    options,
+    executor,
+  )
 
   if (ts.length === 0) return []
 
-  await resolvePinnedBlock()
+  // F8: the ONE effective block every step's executeMulticall uses — either
+  // `options?.block` untouched (pinBlock off/absent, the default) or the
+  // resolved pin (see `resolvePinnedBlock`'s doc comment in
+  // `src/core/internal.ts`). Replaces the direct `options?.block` reads
+  // below.
+  const effectiveBlock = await resolvePinnedBlock(options, executor)
 
   // Dead-task bookkeeping: once true, no further buildStepCalls/consumeStepResults
   // calls happen for that task index, and finalize() is skipped entirely.
@@ -198,7 +207,7 @@ export async function runSettled<TResult>(
         // itself now — see `src/core/pool.ts` — so it applies uniformly to
         // this call whether the pool handed it a whole batch or a bisected
         // sub-batch.
-        return executor.executeMulticall(batch, options?.block)
+        return executor.executeMulticall(batch, effectiveBlock)
       }
 
       // Adaptive OFF (default) — byte-for-byte T14/F5 behavior: catch a
@@ -211,7 +220,7 @@ export async function runSettled<TResult>(
       // now the pool's job — see `executeBatch` above and `pool.ts` — so
       // this branch, like the adaptive one, is just the raw executor call.)
       try {
-        return await executor.executeMulticall(batch, options?.block)
+        return await executor.executeMulticall(batch, effectiveBlock)
       } catch (transportError) {
         return synthesizeBatchFailures(batch, transportError)
       }

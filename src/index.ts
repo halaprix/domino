@@ -10,6 +10,7 @@ export type {
   BlockParam,
   BlockTag,
   Eip1193Provider,
+  PinnedBlock,
 } from './core/types'
 export type { BatchOptions } from './core/runMultistepTasks'
 

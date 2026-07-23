@@ -24,6 +24,20 @@ export type BlockParam =
 export const DEFAULT_BLOCK: BlockParam = { blockTag: 'latest' }
 
 /**
+ * The resolved, single-block identity a `pinBlock: true` run pins every step
+ * to (F8) — exposed synchronously via `BatchOptions.onPin`. A subset of
+ * `BlockParam`'s union deliberately missing `blockTag`: by the time a
+ * `PinnedBlock` exists, any tag has already been resolved to a concrete
+ * `blockNumber` (or the input was already an explicit `blockNumber`/
+ * `blockHash`, which need no resolution). See `resolvePinnedBlock` in
+ * `src/core/internal.ts` for the tag -> concrete-block resolution and the
+ * exact mapping table.
+ */
+export type PinnedBlock =
+  | { blockNumber: bigint }
+  | { blockHash: `0x${string}`; requireCanonical?: boolean }
+
+/**
  * Minimal EIP-1193 provider interface.
  * Works with viem PublicClient, ethers providers, window.ethereum.
  *
@@ -78,6 +92,24 @@ export interface StepExecutor {
    * @param block — optional block identifier (defaults to 'latest')
    */
   executeMulticall(calls: StepCall[], block?: BlockParam): Promise<RawResult[]>
+
+  /**
+   * Resolve a `BlockParam` to a concrete block number (F8, `pinBlock`).
+   * Optional — additive: existing custom `StepExecutor` implementations are
+   * unaffected. An executor that omits this method can still be used
+   * normally; it simply can't be used with `pinBlock: true`
+   * (`validatePinCapability` in `src/core/internal.ts` throws up front,
+   * before anything is consumed, when `pinBlock` is requested against an
+   * executor lacking this method).
+   *
+   * @param block — block to resolve; absent means 'latest'. Implementations
+   * are never called with a `blockHash` block by domino's own pin pipeline
+   * (an explicit `blockNumber`/`blockHash` needs no resolution — see
+   * `resolvePinnedBlock`), but a direct caller invoking this method itself
+   * with a `blockHash` should get a clear rejection rather than silently
+   * wrong behavior — `Eip1193Executor`'s implementation throws for that case.
+   */
+  getBlockNumber?(block?: BlockParam): Promise<bigint>
 }
 
 /**

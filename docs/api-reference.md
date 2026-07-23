@@ -39,6 +39,37 @@ The FSM runs through all tasks step-by-step:
 
 Both `defineTask` output and hand-written `MultistepTask` objects are ordinary `MultistepTask`s to the FSM — they can be freely mixed in the same `tasks` array and batched together.
 
+## Atomicity
+
+One physical multicall batch (one `eth_call` against Multicall3, or its deployless fallback) is atomic: every call inside it reads the same EVM state, because the node evaluates the whole batch against a single block. Across separate batches — later steps of the same task, or physical batches split by `batchSize`/`maxConcurrentBatches` within one step — there is **no such guarantee** by default: the chain can advance between round-trips.
+
+Set `pinBlock: true` to remove that gap. The run resolves ONE concrete block at the very start and reuses it for every step and every physical batch for the rest of that `run`/`runSettled` call:
+
+| `block` input | Resolved to | Extra RPC |
+|---|---|---|
+| absent, or `{ blockTag: 'latest' \| 'safe' \| 'finalized' }` | `executor.getBlockNumber(block)` → `{ blockNumber }`, used for every step | +1 round-trip |
+| `{ blockTag: 'pending' }` | throws — `pending` has no stable block number | — |
+| `{ blockNumber }` | used as-is | none |
+| `{ blockHash, requireCanonical? }` | used as-is, `requireCanonical` untouched | none |
+
+```typescript
+import { Eip1193Executor, MulticallResolver, Presets } from "@halaprix/domino"
+import type { MultistepTask } from "@halaprix/domino"
+
+declare const executor: Eip1193Executor
+declare const tasks: MultistepTask<unknown>[]
+
+const resolver = new MulticallResolver(executor)
+
+await resolver.run(tasks, {
+  ...Presets.throughput,
+  pinBlock: true,
+  onPin: (block) => console.log("pinned to", block),
+})
+```
+
+`onPin` — when provided — runs synchronously exactly once per run, only when `pinBlock: true`, with the resolved `PinnedBlock`. If it throws, the run rejects with that error; tasks are already marked consumed by that point, and no multicall batch is ever dispatched. `pinBlock: true` against a `StepExecutor` without `getBlockNumber(block?)` throws immediately, before anything is consumed — a custom `StepExecutor` opts into pinning by implementing that one optional method.
+
 ## `defineTask` — the recommended way to describe a task
 
 `defineTask(build)` runs `build` exactly once, synchronously, and returns a compiled `MultistepTask` — pass it straight to `runMultistepTasks`, `runSettled`, or `resolver.run()`/`resolver.runSettled()`, batched with any other task (including hand-written `MultistepTask`s, see [below](#legacy-hand-written-multisteptask-definetasks-compilation-target)) exactly like before.
@@ -444,7 +475,8 @@ Import the following directly from `@halaprix/domino` (this list is exhaustive �
 
 **Core — FSM executor:**
 - `runMultistepTasks<T>(executor: StepExecutor, tasks: MultistepTask<T>[], options?: BatchOptions): Promise<T[]>`
-- `BatchOptions` — `{ batchSize?: number; block?: BlockParam }`
+- `BatchOptions` — `{ batchSize?: number; maxConcurrentBatches?: number; maxBatchAttempts?: number; adaptiveBatching?: boolean; dedupe?: boolean; block?: BlockParam; pinBlock?: boolean; onPin?: (block: PinnedBlock) => void }`
+- `PinnedBlock` — the resolved block reported to `onPin`: an explicit `blockNumber`, or `blockHash` + optional `requireCanonical` — see [Atomicity](#atomicity)
 
 **Per-task settlement (`runSettled`):**
 - `runSettled<T>(executor: StepExecutor, tasks: MultistepTask<T>[], options?: BatchOptions): Promise<SettledTaskResult<T>[]>`
@@ -468,6 +500,7 @@ Import the following directly from `@halaprix/domino` (this list is exhaustive �
 **Eip1193Executor class:**
 - `constructor(provider: Eip1193Provider)`
 - `executeMulticall(calls: StepCall[], block?: BlockParam): Promise<RawResult[]>`
+- `getBlockNumber(block?: BlockParam): Promise<bigint>` — resolves a `BlockParam` to a concrete block number; used by `pinBlock` (see [Atomicity](#atomicity))
 - `refreshChainId(): Promise<number>`
 
 **`MulticallResolver<TAddr extends string = Address>` class** (implements `ResolverEngine<TAddr>`; signatures below use the default `TAddr = Address`):
@@ -507,7 +540,7 @@ Import the following directly from `@halaprix/domino` (this list is exhaustive �
 - `StepCall` — a single call in a multicall batch
 - `StepResult` — result of a call routed back to its task
 - `MultistepTask<T>` — stateful task pipeline (`maxStep`, `buildStepCalls`, `consumeStepResults`, `finalize`)
-- `StepExecutor` — executor interface (one method: `executeMulticall`)
+- `StepExecutor` — executor interface (`executeMulticall`; an optional `getBlockNumber` powers `pinBlock` — see [Atomicity](#atomicity))
 - `RawResult` — raw return value before routing
 - `Address` — hex string type alias (`0x${string}`)
 - `BlockParam` — block identifier (blockNumber, blockTag, or blockHash)
