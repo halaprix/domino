@@ -26,7 +26,7 @@ import { parseAbiMemoized } from './abi'
 import { DominoCallError as E } from './errors' // alias only shortens THIS file's source; esbuild resolves imports to the shared top-level binding when bundling, so it costs nothing either way
 import { DIAGNOSTICS as DG } from './runSettled'
 import type { TaskDiagnostics, DiagnosticsCarrier } from './runSettled'
-import { SINGLE_USE } from './internal'
+import { SINGLE_USE, DEDUPE_ELIGIBLE } from './internal'
 import type { SingleUseCarrier } from './internal'
 
 // ─── Public types ───────────────────────────────────────────────────────────
@@ -123,12 +123,6 @@ export interface TaskBuilder {
 }
 
 // ─── Internal graph representation ─────────────────────────────────────────
-
-/** Internal, non-exported marker stamped on every compiled StepCall. `true`
- *  unless the spec had `dedupe: false`. Nothing reads it yet — dedup (1.2)
- *  does. Deliberately NOT exported (not even for tests): presence/value are
- *  verified via `Object.getOwnPropertySymbols` + `Symbol.description`. */
-const DEDUPE_ELIGIBLE = Symbol('domino.dedupeEligible')
 
 /**
  * Internal graph node — call and derive nodes share ONE flat (mostly

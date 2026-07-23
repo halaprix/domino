@@ -17,7 +17,7 @@ _|    _|  _|    _|  _|    _|    _|  _|  _|    _|  _|    _|
 
 [![CI](https://github.com/halaprix/domino/actions/workflows/ci.yml/badge.svg)](https://github.com/halaprix/domino/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/@halaprix/domino)](https://www.npmjs.com/package/@halaprix/domino)
-[![bundle size](https://img.shields.io/badge/gzip-12.2KB-brightgreen)](https://www.npmjs.com/package/@halaprix/domino)
+[![bundle size](https://img.shields.io/badge/gzip-13.0KB-brightgreen)](https://www.npmjs.com/package/@halaprix/domino)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5-blue)](https://www.typescriptlang.org/)
 [![MIT License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 

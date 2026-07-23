@@ -156,7 +156,7 @@ export async function runSettled<TResult>(
   // `runSettled(executor, [], { batchSize: 0 })` rejects rather than
   // silently resolving to `[]` (unchanged 1.0 ordering — contrast with
   // `runMultistepTasks`, which checks the empty-tasks shortcut first).
-  const { batchSize, maxConcurrentBatches, adaptiveBatching, maxBatchAttempts } = prepareRun(ts, options)
+  const { batchSize, maxConcurrentBatches, adaptiveBatching, maxBatchAttempts, dedupe } = prepareRun(ts, options)
 
   if (ts.length === 0) return []
 
@@ -243,7 +243,7 @@ export async function runSettled<TResult>(
     },
   }
 
-  await runSteps(ts, { batchSize, maxConcurrentBatches, adaptiveBatching, maxBatchAttempts }, policy)
+  await runSteps(ts, { batchSize, maxConcurrentBatches, adaptiveBatching, maxBatchAttempts, dedupe }, policy)
 
   return ts.map((task, i): SettledTaskResult<TResult> => {
     // Read the task's OWN live diagnostics if it carries the channel (defineTask,
