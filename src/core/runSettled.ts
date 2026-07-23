@@ -27,19 +27,38 @@
  * other two lifecycle hooks so a broken task can never corrupt or block its
  * siblings' routing.)
  *
- * **Scope note (F5, legacy-only slice):** `defineTask` does not exist yet
- * (lands in T8). `TaskDiagnostics.optionalFailures` is therefore always `[]`
- * for the plain `MultistepTask` consumers this module supports today — the
- * array/type exists now so that a later `defineTask` can populate it purely
- * additively. Likewise, the "rejected only when a failed non-optional ref is
- * reachable from the returned shape" rule is a `defineTask`-only refinement;
- * the legacy rule implemented here is simply "rejected iff the task's own
- * code (`buildStepCalls`/`consumeStepResults`/`finalize`) throws".
+ * **Scope note (F5/F2 boundary):** `TaskDiagnostics.optionalFailures` is `[]`
+ * for plain `MultistepTask` consumers (no `[DIAGNOSTICS]` channel to read).
+ * `defineTask` (T8) tasks carry a live diagnostics object read through the
+ * `DIAGNOSTICS` symbol below — see its doc comment. Likewise, the "rejected
+ * only when a failed non-optional ref is reachable from the returned shape"
+ * rule is a `defineTask`-only refinement; the legacy rule implemented here
+ * is simply "rejected iff the task's own code (`buildStepCalls`/
+ * `consumeStepResults`/`finalize`) throws".
  */
 
 import type { MultistepTask, StepCall, StepResult, StepExecutor, RawResult, Address } from './types'
 import type { BatchOptions } from './runMultistepTasks'
 import { DominoCallError } from './errors'
+
+/**
+ * Internal-only diagnostics channel (F2). A compiled `defineTask()` output
+ * carries `[DIAGNOSTICS]: () => TaskDiagnostics` returning ITS live
+ * diagnostics object (mutated as `optional` refs fail during execution).
+ * `runSettled` reads it — see the two call sites below — falling back to an
+ * empty `TaskDiagnostics` for tasks that don't carry the channel (every
+ * legacy `MultistepTask`).
+ *
+ * Exported so `defineTask.ts` can import it and stamp its compiled tasks,
+ * but this symbol is NEVER re-exported from `src/index.ts` — it is not part
+ * of the public API surface.
+ */
+export const DIAGNOSTICS: unique symbol = Symbol('domino.diagnostics')
+
+/** Structural type for a task that carries the internal diagnostics channel. */
+export interface DiagnosticsCarrier {
+  [DIAGNOSTICS]?: () => TaskDiagnostics
+}
 
 /**
  * Per-task diagnostics — always present (never optional), even when empty.
@@ -92,11 +111,6 @@ export async function runSettled<TResult>(
   if (tasks.length === 0) return []
 
   const maxStep = tasks.reduce((max, task) => (task.maxStep > max ? task.maxStep : max), 0)
-
-  // Each task owns a distinct diagnostics object — never shared across tasks,
-  // even though every legacy task's array stays empty in this PR (see module
-  // doc "Scope note").
-  const diagnostics: TaskDiagnostics[] = tasks.map(() => ({ optionalFailures: [] }))
 
   // Dead-task bookkeeping: once true, no further buildStepCalls/consumeStepResults
   // calls happen for that task index, and finalize() is skipped entirely.
@@ -201,14 +215,19 @@ export async function runSettled<TResult>(
   }
 
   return tasks.map((task, i): SettledTaskResult<TResult> => {
+    // Read the task's OWN live diagnostics if it carries the channel (defineTask,
+    // F2); every legacy MultistepTask lacks [DIAGNOSTICS] and falls back to an
+    // empty (freshly allocated, never shared) TaskDiagnostics.
+    const carrier = task as MultistepTask<TResult> & DiagnosticsCarrier
+    const diagnostics = (): TaskDiagnostics => carrier[DIAGNOSTICS]?.() ?? { optionalFailures: [] }
     if (dead[i]) {
-      return { status: 'rejected', error: deadError[i], diagnostics: diagnostics[i]! }
+      return { status: 'rejected', error: deadError[i], diagnostics: diagnostics() }
     }
     try {
       const value = task.finalize()
-      return { status: 'fulfilled', value, diagnostics: diagnostics[i]! }
+      return { status: 'fulfilled', value, diagnostics: diagnostics() }
     } catch (err) {
-      return { status: 'rejected', error: err, diagnostics: diagnostics[i]! }
+      return { status: 'rejected', error: err, diagnostics: diagnostics() }
     }
   })
 }
