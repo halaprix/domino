@@ -143,6 +143,21 @@
  *   before: 66,345 bytes (64.79KB)  gzip 17,533 bytes (17.12KB)
  *   after:  64,510 bytes (63.00KB)  gzip 17,185 bytes (16.79KB)
  *   delta:  -1,835 bytes raw (-1.79KB)  -348 bytes gzip (-0.34KB)
+ *
+ * 1.3 (G1 external-review round, P1 — `resolveAll` v-undefined skip-chain):
+ * closes a gap where a "successful"-but-malformed executor value (e.g.
+ * `balanceOf` resolving to a non-bigint) demoted to `undefined` by a
+ * handler's own coercion derive could still reach a DEPENDENT call's own
+ * argument encoding undetected. `src/core/defineTask.ts`'s call-mode
+ * `resolveAll` now treats a `'v'`-with-`undefined`-value position the same
+ * as a `'u'`/`'f'` one (synthesizing a "argument resolved to undefined"
+ * cause); `erc4626`'s `convertToAssets` now takes the COERCED `balance` ref,
+ * not the raw call ref. Small net increase (new branch + doc comments +
+ * three new core tests do not ship, but the branch itself and the coercion
+ * re-route do). Measured delta:
+ *   before: 64,510 bytes (63.00KB)  gzip 17,185 bytes (16.79KB)
+ *   after:  64,678 bytes (63.16KB)  gzip 17,234 bytes (16.83KB)
+ *   delta:  +168 bytes raw (+0.16KB)  +49 bytes gzip (+0.04KB)
  */
 
 import { describe, expect, it } from 'vitest'

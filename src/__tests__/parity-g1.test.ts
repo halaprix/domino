@@ -434,6 +434,180 @@ describe('G1 parity — erc4626', () => {
   })
 })
 
+describe('G1 parity — malformed-success values (external review P1)', () => {
+  // A "successful"-but-malformed executor value (right `status`, wrong
+  // runtime type — e.g. `balanceOf` resolving to a string) is what the
+  // legacy oracle's `asString`/`asNumber`/`asBigInt`/`asAddress` helpers
+  // defensively coerce to `undefined`. The new impl must do the same for
+  // every field (see `src/handlers/erc20.ts`/`erc4626.ts`'s coercion
+  // derives) AND — for `balanceOf` specifically, since its value feeds
+  // `convertToAssets`'s arg — must never dispatch that dependent call with
+  // the bogus value (`src/core/defineTask.ts`'s call-mode `resolveAll`
+  // v-undefined skip-chain, external review P1).
+
+  it('erc20 : symbol/decimals/balance each malformed individually still toStrictEqual the legacy-coerced result', async () => {
+    // symbol: bigint instead of string : decimals: non-numeric string : balance: non-bigint string.
+    const malformedCases: { name: string; steps: RawResult[][] }[] = [
+      {
+        name: 'symbol malformed (bigint instead of string)',
+        steps: [[
+          { status: 'success', value: 42n },
+          { status: 'success', value: 6n },
+          { status: 'success', value: 1_000_000n },
+        ]],
+      },
+      {
+        name: 'decimals malformed (non-numeric string)',
+        steps: [[
+          { status: 'success', value: 'USDC' },
+          { status: 'success', value: 'not-a-number' },
+          { status: 'success', value: 1_000_000n },
+        ]],
+      },
+      {
+        name: 'balance malformed (string instead of bigint)',
+        steps: [[
+          { status: 'success', value: 'USDC' },
+          { status: 'success', value: 6n },
+          { status: 'success', value: 'not-a-bigint' },
+        ]],
+      },
+    ]
+
+    for (const { steps } of malformedCases) {
+      const { legacy, fresh } = await runBoth(
+        buildErc20TaskLegacy,
+        buildErc20Task,
+        { token: TOKEN, owner: OWNER },
+        steps,
+      )
+      expect(fresh).toStrictEqual(legacy)
+    }
+
+    // Concrete expected shapes, spelled out (not just cross-impl equality):
+    expect(
+      (await runBoth(buildErc20TaskLegacy, buildErc20Task, { token: TOKEN, owner: OWNER }, malformedCases[0]!.steps))
+        .fresh,
+    ).toStrictEqual({ symbol: undefined, decimals: 6, balance: 1_000_000n })
+    expect(
+      (await runBoth(buildErc20TaskLegacy, buildErc20Task, { token: TOKEN, owner: OWNER }, malformedCases[1]!.steps))
+        .fresh,
+    ).toStrictEqual({ symbol: 'USDC', decimals: undefined, balance: 1_000_000n })
+    expect(
+      (await runBoth(buildErc20TaskLegacy, buildErc20Task, { token: TOKEN, owner: OWNER }, malformedCases[2]!.steps))
+        .fresh,
+    ).toStrictEqual({ symbol: 'USDC', decimals: 6, balance: undefined })
+  })
+
+  const malformedStep1Fields: { name: string; index: number; malformedValue: unknown }[] = [
+    { name: 'symbol', index: 0, malformedValue: 42n },
+    { name: 'decimals', index: 1, malformedValue: 'not-a-number' },
+    { name: 'asset', index: 2, malformedValue: 42n }, // not a '0x...' string
+    { name: 'balanceOf', index: 3, malformedValue: 'not-a-bigint' },
+    { name: 'maxWithdraw', index: 4, malformedValue: 'not-a-bigint' },
+    { name: 'maxRedeem', index: 5, malformedValue: 'not-a-bigint' },
+  ]
+
+  for (const field of malformedStep1Fields) {
+    it(`erc4626 : ${field.name} malformed (success, wrong runtime type) : coerces to undefined like legacy${
+      field.name === 'balanceOf' ? ', step 2 not dispatched, position undefined, fulfilled under run() AND runSettled' : ''
+    }`, async () => {
+      const wellFormed: RawResult[] = [
+        { status: 'success', value: 'wstETH' },
+        { status: 'success', value: 18n },
+        { status: 'success', value: ASSET },
+        { status: 'success', value: 500_000_000_000_000_000n },
+        { status: 'success', value: 1_000_000_000_000_000_000n },
+        { status: 'success', value: 900_000_000_000_000_000n },
+      ]
+      const step1 = wellFormed.map((r, i): RawResult =>
+        i === field.index ? { status: 'success', value: field.malformedValue } : r,
+      )
+      // Step 2 is only ever dispatched if balanceOf resolved to a genuine bigint.
+      const steps: RawResult[][] = field.name === 'balanceOf'
+        ? [step1]
+        : [step1, [{ status: 'success', value: 501_234_567_890_123_456n }]]
+
+      const { legacy, fresh, legacyExecutor, freshExecutor } = await runBoth(
+        buildErc4626TaskLegacy,
+        buildErc4626Task,
+        { vault: VAULT, owner: OWNER },
+        steps,
+      )
+
+      expect(fresh).toStrictEqual(legacy)
+
+      if (field.name === 'balanceOf') {
+        // Codex repro, closed: malformed balance must NOT dispatch
+        // convertToAssets with a bogus arg — executor call-count parity
+        // with legacy (which also never issues a step-2 call here).
+        expect(legacyExecutor.executeMulticall).toHaveBeenCalledTimes(1)
+        expect(freshExecutor.executeMulticall).toHaveBeenCalledTimes(1)
+        expect(fresh.position).toBeUndefined()
+
+        // Fulfilled (never rejects) under BOTH run() (already proven above,
+        // since `runBoth` uses `runMultistepTasks`/`run()`) AND runSettled.
+        const settledExecutor = mockExecutorFrom(steps)
+        const [settled] = await runSettled(settledExecutor, [buildErc4626Task({ vault: VAULT, owner: OWNER })])
+        expect(settled!.status).toBe('fulfilled')
+        const settledValue = (settled as { status: 'fulfilled'; value: typeof fresh }).value
+        expect(settledValue).toStrictEqual(fresh)
+
+        // Diagnostics: malformed values add NO optionalFailures noise beyond
+        // the documented accepted-delta extension — exactly ONE entry, for
+        // `convertToAssets`'s v-undefined skip (never for `balanceOf` itself,
+        // which genuinely SUCCEEDED at the StepResult level; only its
+        // COERCED value was rejected). The synthesized cause is the
+        // "argument resolved to undefined" DominoCallError from
+        // `src/core/defineTask.ts`'s call-mode `resolveAll`.
+        expect(settled!.diagnostics.optionalFailures).toHaveLength(1)
+        const entry = settled!.diagnostics.optionalFailures[0]!
+        expect(entry.functionName).toBe('convertToAssets')
+        expect(entry.error.kind).toBe('skipped')
+        expect(entry.error.cause).toBeInstanceOf(DominoCallError)
+        expect((entry.error.cause as DominoCallError).message).toBe('argument resolved to undefined')
+      } else {
+        expect(legacyExecutor.executeMulticall).toHaveBeenCalledTimes(2)
+        expect(freshExecutor.executeMulticall).toHaveBeenCalledTimes(2)
+
+        // No optionalFailures noise at all for the other 5 fields — each
+        // one's OWN call succeeded; only its coercion derive rejected the
+        // value, and nothing downstream depends on it.
+        const settledExecutor = mockExecutorFrom(steps)
+        const [settled] = await runSettled(settledExecutor, [buildErc4626Task({ vault: VAULT, owner: OWNER })])
+        expect(settled!.status).toBe('fulfilled')
+        expect(settled!.diagnostics.optionalFailures).toHaveLength(0)
+      }
+    })
+  }
+
+  it('erc4626 : convertToAssets (step 2) malformed success value : assets undefined, no cascade (nothing depends on it)', async () => {
+    const { legacy, fresh } = await runBoth(
+      buildErc4626TaskLegacy,
+      buildErc4626Task,
+      { vault: VAULT, owner: OWNER },
+      [
+        [
+          { status: 'success', value: 'wstETH' },
+          { status: 'success', value: 18n },
+          { status: 'success', value: ASSET },
+          { status: 'success', value: 500_000_000_000_000_000n },
+          { status: 'success', value: 1_000_000_000_000_000_000n },
+          { status: 'success', value: 900_000_000_000_000_000n },
+        ],
+        [{ status: 'success', value: 'not-a-bigint' }],
+      ],
+    )
+    expect(fresh).toStrictEqual(legacy)
+    expect(fresh.position).toStrictEqual({
+      balance: 500_000_000_000_000_000n,
+      assets: undefined,
+      maxWithdraw: 1_000_000_000_000_000_000n,
+      maxRedeem: 900_000_000_000_000_000n,
+    })
+  })
+})
+
 describe('G1 accepted delta 1 — runSettled diagnostics', () => {
   it('new impl retains the executor-produced DominoCallError in diagnostics.optionalFailures; legacy always reports []', async () => {
     const revertError = new DominoCallError('execution reverted', {

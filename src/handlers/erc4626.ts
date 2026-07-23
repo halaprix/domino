@@ -11,12 +11,21 @@
  * (G1) Internally reimplemented on `defineTask` — public `buildErc4626Task`/
  * `resolveErc4626*` signatures and return shapes are unchanged from 1.0. Every
  * contract call is `optional: true`, replicating 1.0's silent-undefined-
- * per-field semantics. `convertToAssets` takes the RAW `balanceOf` call ref
- * (not the coerced value) as its `args` — this is what replicates the old
- * step-2 gating exactly: a failed/malformed balance demotes that ref to
- * `undefined`, which a call can never encode, so `convertToAssets` is
- * skip-chained (never dispatched) instead of being called with a bogus
- * argument — matching 1.0's `if (ctx.balance === undefined) return []`.
+ * per-field semantics — and, crucially, EVERY consumed value (including
+ * ones that feed another call's `args`, like `balanceOf`'s result feeding
+ * `convertToAssets`) is routed through the same defensive coercion helper
+ * (`asString`/`asNumber`/`asBigInt`/`asAddress`, unchanged from the legacy
+ * oracle) the pre-migration handler used — never the raw call ref. This
+ * matters beyond output-shape parity: a "successful"-but-malformed executor
+ * value (e.g. `balanceOf` resolving to a non-bigint) must demote to
+ * `undefined` exactly like 1.0's `asBigInt`/etc. did, so it can never reach
+ * as far as `convertToAssets`'s own argument encoding — the core's
+ * call-mode `resolveAll` (`src/core/defineTask.ts`, external review P1)
+ * skip-chains a coerced-to-`undefined` argument the same way it already
+ * skip-chained an outright call failure, so `convertToAssets` is never
+ * dispatched with a bogus arg either way — matching 1.0's
+ * `if (ctx.balance === undefined) return []` for BOTH failure modes, not
+ * just the outright-failure one.
  * `position`'s conditional-key shape (T11) is reproduced with `t.derive`:
  * `undefined` when balance never resolved, else an object with `maxWithdraw`/
  * `maxRedeem` keys present ONLY when those calls resolved (never
@@ -198,20 +207,25 @@ export function buildErc4626Task(params: {
 
     const maxWithdraw = t.derive([maxWithdrawCall], asBigInt)
     const maxRedeem = t.derive([maxRedeemCall], asBigInt)
+    const balance = t.derive([balanceCall], asBigInt)
 
-    // Depth 2 (step 2): args take the RAW balanceCall ref (not the coerced
-    // `balance` derive below) — see the module doc comment for why this is
-    // what replicates 1.0's step-2 gating exactly (skip-chained, never
-    // dispatched, when balance failed or came back malformed).
+    // Depth 2 (step 2): args take the COERCED `balance` ref (post-asBigInt),
+    // not the raw `balanceCall` — see the module doc comment. This is what
+    // replicates 1.0's step-2 gating for BOTH a failed balanceOf call AND a
+    // "successful"-but-malformed one (e.g. balanceOf resolving to a
+    // non-bigint): `asBigInt` demotes the malformed case to `undefined`
+    // (still a 'v' state, never a call-level failure), and the core's
+    // call-mode `resolveAll` (`src/core/defineTask.ts`, external review P1)
+    // now skip-chains a 'v'-undefined argument exactly like a 'u'/'f' one —
+    // `convertToAssets` is never dispatched with a bogus arg either way.
     const assetsCall = t.call({
       target: vault,
       abi: erc4626Abi,
       functionName: 'convertToAssets',
-      args: [balanceCall],
+      args: [balance],
       optional: true,
     })
 
-    const balance = t.derive([balanceCall], asBigInt)
     const assets = t.derive([assetsCall], asBigInt)
 
     const position = t.derive(
