@@ -15,6 +15,7 @@
 
 import type { MultistepTask, StepCall, StepResult, StepExecutor, RawResult, BlockParam } from './types'
 import { prepareRun, resolvePinnedBlock } from './internal'
+import { runSteps, type StepEnginePolicy } from './engine'
 
 /**
  * Options for runMultistepTasks.
@@ -25,9 +26,40 @@ export interface BatchOptions {
    *
    * Multicall3 aggregate3 has a per-call gas limit. When a single step has
    * more than this many calls, it is split into sequential batches.
-   * Default: 100. Must be a positive integer — anything else throws.
+   * Default: 100. Must be a positive safe integer ≥ 1 — anything else throws.
    */
   batchSize?: number
+
+  /**
+   * Concurrency-limited pool size for dispatching physical batches within a
+   * single step (F6a). Batches are dispatched in original index order as
+   * permits free; routing is index-based and does not depend on completion
+   * order. Default: 1 (genuinely sequential — batch k+1 is not dispatched
+   * until batch k settles, bit-identical to the pre-F6a behavior). Must be
+   * a positive safe integer ≥ 1 — anything else throws.
+   *
+   * **Cancellation policy (fail-fast):** on the first batch whose executor
+   * call rejects, no further queued batches for that step are dispatched;
+   * batches already in flight are allowed to settle (their results
+   * discarded); once every in-flight batch has settled, the run rejects
+   * with the selected terminal error (see `src/core/pool.ts` for the exact
+   * selection rule). This is deterministic only when exactly one batch
+   * fails irrecoverably — with multiple concurrently-failing batches, which
+   * one's error is thrown is explicitly unspecified (timing-dependent).
+   */
+  maxConcurrentBatches?: number
+
+  /**
+   * Maximum retry attempts for a failing physical batch before it is
+   * treated as a terminal failure (adaptive bisection, F6b). Default:
+   * `2 * Math.ceil(Math.log2(batchSize)) + 1`. Must be a positive safe
+   * integer ≥ 1 — anything else throws.
+   *
+   * Validated and defaulted as of F6a, but NOT YET consumed — every batch
+   * failure is currently terminal on first rejection (no retry/bisection).
+   * Adaptive bisection lands in a later release.
+   */
+  maxBatchAttempts?: number
 
   /** Block to query at (defaults to 'latest'). Same block used for ALL steps. */
   block?: BlockParam
@@ -84,82 +116,44 @@ export async function runMultistepTasks<TResult>(
   // -> mark-consumed), see `src/core/internal.ts`. Only branded tasks
   // (`defineTask`/`buildErc20Task`/`buildErc4626Task` output) are affected —
   // legacy `MultistepTask`s pass through every step as a no-op.
-  const batchSize = prepareRun(ts, options)
+  const { batchSize, maxConcurrentBatches } = prepareRun(ts, options)
   await resolvePinnedBlock()
 
-  const maxStep = ts.reduce((max, task) => (task.maxStep > max ? task.maxStep : max), 0)
-
-  for (let step = 1; step <= maxStep; step++) {
-    const calls: StepCall[] = []
-    const mapping: { taskIndex: number; key: string }[] = []
-
-    for (let taskIndex = 0; taskIndex < ts.length; taskIndex++) {
+  // `run`'s fail-fast policy (F6a) — see `src/core/engine.ts`'s doc comment
+  // for the full hook contract. Every hook here either lets a throw
+  // propagate untouched (buildStepCalls/consumeStepResults — a plain
+  // synchronous throw inside this async function's body, exactly like the
+  // pre-F6a code) or is the raw unwrapped executor call (executeBatch),
+  // whose rejection is what `runBatchPool` treats as the fail-fast trigger.
+  const policy: StepEnginePolicy = {
+    buildStepCalls(taskIndex, step) {
       const task = ts[taskIndex]!
-      if (step > task.maxStep) continue
+      if (step > task.maxStep) return undefined
+      return task.buildStepCalls(step)
+    },
 
-      const stepCalls = task.buildStepCalls(step)
-      for (const call of stepCalls) {
-        calls.push(call)
-        mapping.push({ taskIndex, key: call.key })
+    async executeBatch(batch) {
+      const results = await executor.executeMulticall(batch, options?.block)
+
+      // Dev-time guard: a misbehaving executor that returns fewer results than
+      // calls would silently corrupt routing — fail loudly instead.
+      if (results.length !== batch.length) {
+        throw new Error(
+          `StepExecutor returned ${results.length} results for ${batch.length} calls — length mismatch`,
+        )
       }
-    }
+      return results
+    },
 
-    // Pre-allocate a 2D array indexed by taskIndex for O(1) result grouping.
-    // Avoids Map hashing overhead — taskIndex is sequential zero-based, so
-    // array indexing is both faster and simpler.
-    const perTaskResults: StepResult[][] = Array.from({ length: ts.length }, () => [])
-
-    // Only hit the network when there are calls; a step where every active task
-    // built nothing still dispatches empty results below (consistent per-step
-    // notification regardless of sibling tasks).
-    if (calls.length > 0) {
-      // Split calls into batches to stay under per-call gas limits.
-      // Each batch executes as a separate multicall round-trip.
-      for (let batchStart = 0; batchStart < calls.length; batchStart += batchSize) {
-        const batch = calls.slice(batchStart, batchStart + batchSize)
-        const results = await executor.executeMulticall(batch, options?.block)
-
-        // Dev-time guard: a misbehaving executor that returns fewer results than
-        // calls would silently corrupt routing — fail loudly instead.
-        if (results.length !== batch.length) {
-          throw new Error(
-            `StepExecutor returned ${results.length} results for ${batch.length} calls — length mismatch`,
-          )
-        }
-
-        // Route this batch's results into the shared perTaskResults arrays.
-        for (let i = 0; i < results.length; i++) {
-          const mappingEntry = mapping[batchStart + i]
-          if (!mappingEntry) continue
-          const { taskIndex, key } = mappingEntry
-          const result = results[i] as RawResult
-
-          const list = perTaskResults[taskIndex]!
-          if (result.status === 'success') {
-            list.push({ status: 'success', key, value: result.value })
-          } else {
-            // Forward the SAME error object — never wrap or discard it.
-            // exactOptionalPropertyTypes-safe: only include `error` when the
-            // RawResult actually carried one.
-            list.push({
-              status: 'failure',
-              key,
-              ...('error' in result && result.error !== undefined ? { error: result.error } : {}),
-            })
-          }
-        }
-      }
-    }
-
-    // Dispatch to every task active at this step — including those that built no
-    // calls — so consumeStepResults is invoked consistently each step.
-    for (let i = 0; i < ts.length; i++) {
-      const task = ts[i]
+    consumeStepResults(taskIndex, step, results) {
+      const task = ts[taskIndex]
       if (task && step <= task.maxStep) {
-        task.consumeStepResults(step, perTaskResults[i]!)
+        task.consumeStepResults(step, results)
       }
-    }
+    },
   }
+
+  await runSteps(ts, { batchSize, maxConcurrentBatches }, policy)
 
   return ts.map((task) => task.finalize())
 }
