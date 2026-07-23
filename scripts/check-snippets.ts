@@ -6,7 +6,9 @@
  * consumer would hit it.
  *
  * Sources checked:
- *   - Literal files: docs/snippets/*.ts
+ *   - Literal files: docs/snippets/*.ts AND examples/*.ts (G2 — full runnable
+ *     examples like `examples/refinance.ts` get the exact same dist-typed
+ *     merge gate as a published snippet; see `discoverExampleFiles` below).
  *   - Fenced ```ts / ```typescript blocks extracted from README.md,
  *     MIGRATION.md, and docs/*.md (top-level only — docs/plans/*.md is
  *     internal planning material, not a published doc).
@@ -198,6 +200,12 @@ function discoverLiteralSnippets(): string[] {
   return listFiles(join(ROOT, 'docs', 'snippets'), '.ts')
 }
 
+/** G2 — `examples/*.ts` (e.g. `examples/refinance.ts`) get the same literal-
+ *  file, dist-typed treatment as `docs/snippets/*.ts` above; see `materialize`. */
+function discoverExampleFiles(): string[] {
+  return listFiles(join(ROOT, 'examples'), '.ts')
+}
+
 // ─── Materialization ────────────────────────────────────────────────────────
 
 function relPath(p: string): string {
@@ -224,17 +232,26 @@ function materialize(): { manifest: Manifest[]; checkedFiles: CheckedFile[]; tot
   let totalChecked = 0
   let totalSkipped = 0
 
-  // Literal files — copied verbatim, already self-contained modules.
-  for (const file of discoverLiteralSnippets()) {
-    const dest = join(BUILD_DIR, 'snippets', basename(file))
-    mkdirSync(dirname(dest), { recursive: true })
-    writeFileSync(dest, readFileSync(file, 'utf8'))
-    manifest.push({
-      generatedFile: relPath(dest),
-      sourceFile: relPath(file),
-      sourceLines: 'whole file',
-    })
-    totalChecked += 1
+  // Literal files — copied verbatim, already self-contained modules. Two
+  // source dirs (docs/snippets/*.ts and, since G2, examples/*.ts) each
+  // materialize into their OWN BUILD_DIR subfolder (named after the source
+  // dir) so a same-named file in each location can never collide.
+  const literalGroups: readonly (readonly [string, string[]])[] = [
+    ['snippets', discoverLiteralSnippets()],
+    ['examples', discoverExampleFiles()],
+  ]
+  for (const [destSubdir, files] of literalGroups) {
+    for (const file of files) {
+      const dest = join(BUILD_DIR, destSubdir, basename(file))
+      mkdirSync(dirname(dest), { recursive: true })
+      writeFileSync(dest, readFileSync(file, 'utf8'))
+      manifest.push({
+        generatedFile: relPath(dest),
+        sourceFile: relPath(file),
+        sourceLines: 'whole file',
+      })
+      totalChecked += 1
+    }
   }
 
   // Fenced blocks extracted from markdown docs.
