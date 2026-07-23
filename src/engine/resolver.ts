@@ -19,12 +19,12 @@ import { runMultistepTasks, type BatchOptions } from '../core/runMultistepTasks'
 import { runSettled, type SettledTaskResult } from '../core/runSettled'
 import {
   resolveErc20Token,
-  resolveErc20TokensBulk,
+  resolveErc20Bulk,
   type Erc20TokenResolution,
 } from '../handlers/erc20'
 import {
   resolveErc4626Vault,
-  resolveErc4626VaultsBulk,
+  resolveErc4626Bulk,
   type Erc4626VaultResolution,
 } from '../handlers/erc4626'
 
@@ -100,7 +100,7 @@ export class MulticallResolver<TAddr extends string = Address>
 
   resolveErc20(params: { token: TAddr; owner?: TAddr; block?: BlockParam }): Promise<Erc20TokenResolution> {
     return resolveErc20Token({
-      client: this._executor,
+      executor: this._executor,
       ...erc20Params(params.token, params.owner),
       ...(params.block !== undefined ? { block: params.block } : {}),
     })
@@ -111,8 +111,8 @@ export class MulticallResolver<TAddr extends string = Address>
     batchSize?: number
     block?: BlockParam
   }): Promise<Erc20TokenResolution[]> {
-    return resolveErc20TokensBulk({
-      client: this._executor,
+    return resolveErc20Bulk({
+      executor: this._executor,
       entries: params.entries.map((e) => erc20Params(e.token, e.owner)),
       ...(params.batchSize !== undefined ? { batchSize: params.batchSize } : {}),
       ...(params.block !== undefined ? { block: params.block } : {}),
@@ -121,7 +121,7 @@ export class MulticallResolver<TAddr extends string = Address>
 
   resolveErc4626(params: { vault: TAddr; owner?: TAddr; block?: BlockParam }): Promise<Erc4626VaultResolution> {
     return resolveErc4626Vault({
-      client: this._executor,
+      executor: this._executor,
       ...erc4626Params(params.vault, params.owner),
       ...(params.block !== undefined ? { block: params.block } : {}),
     })
@@ -132,8 +132,8 @@ export class MulticallResolver<TAddr extends string = Address>
     batchSize?: number
     block?: BlockParam
   }): Promise<Erc4626VaultResolution[]> {
-    return resolveErc4626VaultsBulk({
-      client: this._executor,
+    return resolveErc4626Bulk({
+      executor: this._executor,
       entries: params.entries.map((e) => erc4626Params(e.vault, e.owner)),
       ...(params.batchSize !== undefined ? { batchSize: params.batchSize } : {}),
       ...(params.block !== undefined ? { block: params.block } : {}),
