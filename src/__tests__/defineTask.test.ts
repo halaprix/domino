@@ -417,6 +417,118 @@ describe('defineTask — optional escape hatch', () => {
   })
 })
 
+describe('defineTask — a `v`-undefined argument skip-chains a CALL (external review P1)', () => {
+  // Closes a gap where a "successful"-but-malformed upstream value (most
+  // commonly demoted to `undefined` by a handler's own coercion derive, e.g.
+  // `src/handlers/erc4626.ts`'s `asBigInt`) could otherwise reach as far as
+  // a dependent call's argument encoding — see `resolveAll`'s doc comment in
+  // `src/core/defineTask.ts`.
+
+  it('a derive that legitimately resolves to undefined, feeding a non-optional CALL arg, skip-chains that call (synthesized cause, no upstream failure at all)', async () => {
+    let executeCount = 0
+    const executor: StepExecutor = {
+      async executeMulticall(calls): Promise<RawResult[]> {
+        executeCount++
+        // Every call "succeeds" — but with a value the coercion derive
+        // below will reject (not a bigint).
+        return calls.map((): RawResult => ({ status: 'success', value: 'not-a-number' }))
+      },
+    }
+
+    const task = defineTask((t) => {
+      const raw = t.call({ target: ADDR, abi: testAbi, functionName: 'getNum', args: [1n] })
+      // Exactly the handler coercion-derive pattern: legitimately resolves
+      // to `undefined` for a malformed (non-bigint) upstream value.
+      const coerced = t.derive([raw], (v) => (typeof v === 'bigint' ? v : undefined))
+      const dependent = t.call({ target: ADDR, abi: testAbi, functionName: 'getNum', args: [coerced] })
+      return { dependent }
+    })
+
+    const [result] = await runSettled(executor, [task])
+
+    expect(result!.status).toBe('rejected')
+    const err = (result as { status: 'rejected'; error: unknown }).error as DominoCallError
+    expect(err.kind).toBe('skipped')
+    expect(err.cause).toBeInstanceOf(DominoCallError)
+    const cause = err.cause as DominoCallError
+    expect(cause.kind).toBe('skipped')
+    expect(cause.message).toBe('argument resolved to undefined')
+    // No real upstream failure exists to preserve — the synthesized cause
+    // carries no cause of its own (nothing was thrown, nothing reverted).
+    expect(cause.cause).toBeUndefined()
+
+    // `dependent` (depth 2) was never dispatched — only `raw`'s single
+    // executor invocation (step 1) happened.
+    expect(executeCount).toBe(1)
+  })
+
+  it('optional chain: a derive-produced undefined feeding an OPTIONAL call demotes that call too, recorded in diagnostics with the synthesized cause (accepted-delta extension)', async () => {
+    let executeCount = 0
+    const executor: StepExecutor = {
+      async executeMulticall(calls): Promise<RawResult[]> {
+        executeCount++
+        return calls.map((): RawResult => ({ status: 'success', value: 'not-a-number' }))
+      },
+    }
+
+    const task = defineTask((t) => {
+      const raw = t.call({ target: ADDR, abi: testAbi, functionName: 'getNum', args: [1n], optional: true })
+      const coerced = t.derive([raw], (v) => (typeof v === 'bigint' ? v : undefined))
+      const dependent = t.call({
+        target: ADDR,
+        abi: testAbi,
+        functionName: 'getNum',
+        args: [coerced],
+        optional: true,
+      })
+      return { dependent }
+    })
+
+    const [result] = await runSettled(executor, [task])
+
+    expect(result!.status).toBe('fulfilled')
+    expect((result as { status: 'fulfilled'; value: { dependent: bigint | undefined } }).value).toEqual({
+      dependent: undefined,
+    })
+    // `dependent` (depth 2) is skip-chained before ever reaching the
+    // executor — only `raw`'s step-1 call is dispatched.
+    expect(executeCount).toBe(1)
+
+    // `raw`'s OWN call succeeded (the executor returned `status: 'success'`)
+    // — only the coercion derive rejected its value, so `raw` itself never
+    // enters diagnostics. `dependent`'s skip-chain does — the accepted-delta
+    // extension: an optional call can now be demoted by a synthesized
+    // "argument resolved to undefined" cause, not just a real upstream
+    // DominoCallError.
+    expect(result!.diagnostics.optionalFailures).toHaveLength(1)
+    const entry = result!.diagnostics.optionalFailures[0]!
+    expect(entry.error.kind).toBe('skipped')
+    expect(entry.error.cause).toBeInstanceOf(DominoCallError)
+    expect((entry.error.cause as DominoCallError).message).toBe('argument resolved to undefined')
+  })
+
+  it('derives themselves are unaffected: a derive consuming a v-undefined input still computes normally (no skip)', async () => {
+    const executor: StepExecutor = {
+      async executeMulticall(calls): Promise<RawResult[]> {
+        return calls.map((): RawResult => ({ status: 'success', value: 'not-a-number' }))
+      },
+    }
+
+    const task = defineTask((t) => {
+      const raw = t.call({ target: ADDR, abi: testAbi, functionName: 'getNum', args: [1n] })
+      const coerced = t.derive([raw], (v) => (typeof v === 'bigint' ? v : undefined))
+      // A SECOND derive consuming the first derive's (legitimately
+      // undefined) output — derives can always consume `undefined`.
+      const fallback = t.derive([coerced], (v) => v ?? -1n)
+      return { coerced, fallback }
+    })
+
+    const [result] = await runMultistepTasks(executor, [task])
+
+    expect(result).toEqual({ coerced: undefined, fallback: -1n })
+  })
+})
+
 describe('defineTask — internal dedupe-eligibility marker', () => {
   it('stamps every compiled StepCall with the internal marker; dedupe: false yields false', () => {
     const task = defineTask((t) => {
