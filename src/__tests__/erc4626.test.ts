@@ -67,12 +67,14 @@ describe('resolveErc4626Vault', () => {
     // Step 1 calls: symbol, decimals, asset, balanceOf, maxWithdraw, maxRedeem = 6
     const step1 = (executor.executeMulticall as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
     expect(step1).toHaveLength(6)
-    expect(step1[3]).toMatchObject({ key: 'balance', functionName: 'balanceOf' })
+    // `key` is an internal defineTask-assigned id post-G1 migration (no
+    // longer the legacy semantic string) — assert functionName/shape only.
+    expect(step1[3]).toMatchObject({ functionName: 'balanceOf' })
 
     // Step 2 calls: convertToAssets(balance) = 1
     const step2 = (executor.executeMulticall as ReturnType<typeof vi.fn>).mock.calls[1]?.[0]
     expect(step2).toHaveLength(1)
-    expect(step2[0]).toMatchObject({ key: 'assets', functionName: 'convertToAssets' })
+    expect(step2[0]).toMatchObject({ functionName: 'convertToAssets' })
 
     expect(result.metadata.symbol).toBe('wstETH')
     expect(result.metadata.maxWithdraw).toBe(1000000000000000000n)

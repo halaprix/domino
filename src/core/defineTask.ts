@@ -163,6 +163,14 @@ interface Node {
  * the same as `f`, see `resolveAll`). `f` = hard failure (own call failed
  * non-optionally, a derive threw, or skip-chained from an `f`/`u` upstream).
  * The original error is always preserved on `u`/`f` (never discarded).
+ *
+ * Note a `'v'` state's `value` can ALSO legitimately be `undefined` (a
+ * derive that computed `undefined` on purpose — e.g. a handler's coercion
+ * derive demoting a malformed executor value). That is not a distinct `St`
+ * variant — it is still `'v'` — but `resolveAll`, in call-mode only, treats
+ * a `'v'`-with-`undefined`-value input the same as `'u'`/`'f'` (a call
+ * cannot encode `undefined` regardless of which of the three reasons
+ * produced it). See `resolveAll`'s own doc comment.
  */
 type St =
   | { readonly k: 'v'; readonly value: unknown }
@@ -369,17 +377,43 @@ export function defineTask<const S>(build: (t: TaskBuilder) => S): MultistepTask
    * Shared by both `res`'s derive-input loop and `buildStepCalls`' target+arg
    * loop: resolve every position in `xs` (a plain value resolves to itself,
    * a `RefHandle` resolves via `res`), short-circuiting on the first
-   * unusable one. `deriveMode` controls the ONE behavioral difference
-   * between the two callers (see `St`'s doc comment): an `'u'` position
-   * resolves to `undefined` and the loop continues when `deriveMode` is
-   * true (a derive CAN consume `undefined`); otherwise `'u'` is treated
-   * exactly like `'f'` (a call cannot encode `undefined`).
+   * unusable one. `deriveMode` controls the behavioral difference between
+   * the two callers (see `St`'s doc comment):
+   *
+   *   - An `'u'` position resolves to `undefined` and the loop continues
+   *     when `deriveMode` is true (a derive CAN consume `undefined`);
+   *     otherwise `'u'` is treated exactly like `'f'` (a call cannot encode
+   *     `undefined`) — its ORIGINAL error (`r.error`, the upstream call's
+   *     own `DominoCallError`) is forwarded as `c` unchanged, preserving
+   *     today's cause chain.
+   *   - (External review, P1) A `'v'` position whose VALUE happens to be
+   *     `undefined` — most commonly a handler's coercion derive
+   *     legitimately demoting a malformed/unexpected executor value to
+   *     `undefined` — is ALSO unusable, but ONLY in call-mode: a call
+   *     cannot encode `undefined` any more than it can encode a `'u'`/`'f'`
+   *     state, regardless of WHY the value is `undefined`. Without this, a
+   *     "successful"-but-malformed upstream value could reach as far as the
+   *     executor's own arg encoder (`Eip1193Executor` encodes args
+   *     synchronously inside `executeMulticall`) — a bad argument there can
+   *     reject the WHOLE physical batch, not just the one call that
+   *     depended on it. There is no real upstream error to forward here
+   *     (nothing failed — the value is genuinely, successfully
+   *     `undefined`), so a fresh `DominoCallError` is synthesized
+   *     (`kind: 'skipped'`, message "argument resolved to undefined") to
+   *     serve as `c` (and, via `skip()`, the eventual skip error's
+   *     `cause`). In derive-mode this branch never triggers — a `'v'`
+   *     position (undefined or not) is always pushed straight through, same
+   *     as before: derives legitimately consume `undefined`, that's the
+   *     whole point of `deriveMode`.
    */
   function resolveAll(xs: readonly unknown[], deriveMode?: boolean): { vs: unknown[]; c?: E } {
     const vs: unknown[] = []
     for (const x of xs) {
       const r: St = isRefHandle(x) ? res(x.id) : { k: 'v', value: x }
       if (r.k === 'f' || (r.k === 'u' && !deriveMode)) return { vs, c: r.error }
+      if (!deriveMode && r.k === 'v' && r.value === undefined) {
+        return { vs, c: new E('argument resolved to undefined', { kind: 'skipped' }) }
+      }
       vs.push(r.k === 'u' ? undefined : r.value)
     }
     return { vs }

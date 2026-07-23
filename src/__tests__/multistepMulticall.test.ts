@@ -394,8 +394,11 @@ describe('runMultistepTasks', () => {
     const mockExecutor: StepExecutor = {
       async executeMulticall(calls: StepCall[]): Promise<any[]> {
         batchCounts.push(calls.length)
+        // Route by functionName, not `key` — post-G1 the handler's routing
+        // `key` is an internal defineTask-assigned id, no longer the legacy
+        // semantic string ('decimals').
         return calls.map((c) =>
-          c.key === 'decimals'
+          c.functionName === 'decimals'
             ? { status: 'success' as const, value: 6 }
             : { status: 'success' as const, value: 'TOK' },
         )

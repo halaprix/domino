@@ -6,12 +6,30 @@
  *
  * Single-step task:
  *   Step 1: symbol(), decimals(), balanceOf(owner?)
+ *
+ * (G1) Internally reimplemented on `defineTask` — public `buildErc20Task`/
+ * `resolveErc20*` signatures and return shapes are unchanged from 1.0. Every
+ * contract call is `optional: true`, replicating 1.0's silent-undefined-
+ * per-field semantics: a failed call demotes to `undefined` in the result
+ * instead of rejecting the whole resolution. The pre-migration hand-written
+ * implementation is preserved as the parity-test oracle at
+ * `src/__tests__/fixtures/legacy-handlers/erc20.ts` (deleted after one minor
+ * — see its header comment).
+ *
+ * **Accepted behavioral delta (documented, not parity-breaking — see
+ * `src/__tests__/parity-g1.test.ts`):** under `runSettled`, each `optional`
+ * call's `DominoCallError` is now retained in `diagnostics.optionalFailures`
+ * instead of being silently destroyed (the legacy implementation carried no
+ * diagnostics channel at all, so `runSettled` always reported `[]` for these
+ * tasks). Resolved VALUES are byte-for-byte unchanged either way. New calls
+ * are also dedup-ELIGIBLE (`TypedCallSpec`-compiled) — `{ dedupe: true }`
+ * can now merge identical calls across bulk entries; legacy hand-authored
+ * `StepCall`s were never eligible.
  */
 
-import type { Address, MultistepTask, StepCall, StepResult, BlockParam } from '../core/types'
+import type { Address, MultistepTask, BlockParam } from '../core/types'
+import { defineTask } from '../core/defineTask'
 import { runMultistepTasks } from '../core/runMultistepTasks'
-import { SINGLE_USE } from '../core/internal'
-import type { SingleUseCarrier } from '../core/internal'
 import type { ExecutorParam } from './executorParam'
 import { resolveExecutor } from './executorParam'
 
@@ -48,31 +66,20 @@ export interface Erc20TokenResolution {
   balance: bigint | undefined
 }
 
-type Erc20Context = {
-  symbol?: string
-  decimals?: number
-  balance?: bigint
-}
-
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
-// Typed accessor helpers — safe coercion from the untyped RawResult.value.
-// These replace `as T` casts; returning undefined instead of producing wrong data
-// when an executor returns an unexpected value type.
+// Typed accessor helpers — safe coercion from the untyped call result. These
+// replace `as T` casts; returning undefined instead of producing wrong data
+// when an executor returns an unexpected value type. Unchanged from the
+// pre-defineTask implementation (see the legacy oracle) — reused here via
+// `t.derive` so 1.0's defensive coercion behavior survives the migration
+// byte-for-byte (this is what the compat suite pins).
 const asString = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined)
 const asBigInt = (v: unknown): bigint | undefined => (typeof v === 'bigint' ? v : undefined)
 const asNumber = (v: unknown): number | undefined => {
   const n = Number(v)
   return Number.isFinite(n) ? n : undefined
 }
-
-// Routing key constants — typos in key strings would cause silent routing misses;
-// using a const object makes them a compile error instead.
-const KEYS = {
-  symbol: 'symbol',
-  decimals: 'decimals',
-  balance: 'balance',
-} as const
 
 // ─── Domain layer ─────────────────────────────────────────────────────────────
 // buildErc20Task — pure MultistepTask factory; no orchestration dependency.
@@ -83,56 +90,31 @@ export function buildErc20Task(params: {
   owner?: Address
 }): MultistepTask<Erc20TokenResolution> {
   const { token, owner } = params
-  const ctx: Erc20Context = {}
 
-  return {
-    maxStep: 1,
+  return defineTask((t) => {
+    // Creation order matters (parity with 1.0's step-1 call order, and with
+    // positional mock-executor fixtures): symbol, decimals, balanceOf.
+    const symbolCall = t.call({ target: token, abi: erc20Abi, functionName: 'symbol', optional: true })
+    const decimalsCall = t.call({ target: token, abi: erc20Abi, functionName: 'decimals', optional: true })
 
-    buildStepCalls(step) {
-      if (step !== 1) return []
+    const symbol = t.derive([symbolCall], asString)
+    const decimals = t.derive([decimalsCall], asNumber)
 
-      const calls: StepCall[] = [
-        { key: KEYS.symbol, target: token, abi: erc20Abi, functionName: 'symbol' },
-        { key: KEYS.decimals, target: token, abi: erc20Abi, functionName: 'decimals' },
-      ]
+    if (!owner) {
+      return { symbol, decimals, balance: undefined }
+    }
 
-      if (owner) {
-        calls.push({
-          key: KEYS.balance,
-          target: token,
-          abi: erc20Abi,
-          functionName: 'balanceOf',
-          args: [owner],
-        })
-      }
+    const balanceCall = t.call({
+      target: token,
+      abi: erc20Abi,
+      functionName: 'balanceOf',
+      args: [owner],
+      optional: true,
+    })
+    const balance = t.derive([balanceCall], asBigInt)
 
-      return calls
-    },
-
-    consumeStepResults(_step, results: StepResult[]) {
-      for (const result of results) {
-        if (result.status === 'failure') continue
-        // TypeScript narrows result to the success branch here.
-        // exactOptionalPropertyTypes: only assign when the value is defined.
-        const sym = result.key === KEYS.symbol ? asString(result.value) : undefined
-        if (sym !== undefined) ctx.symbol = sym
-        const dec = result.key === KEYS.decimals ? asNumber(result.value) : undefined
-        if (dec !== undefined) ctx.decimals = dec
-        const bal = result.key === KEYS.balance ? asBigInt(result.value) : undefined
-        if (bal !== undefined) ctx.balance = bal
-      }
-    },
-
-    finalize() {
-      return {
-        symbol: ctx.symbol,
-        decimals: ctx.decimals,
-        balance: ctx.balance,
-      }
-    },
-
-    [SINGLE_USE]: true,
-  } as MultistepTask<Erc20TokenResolution> & SingleUseCarrier
+    return { symbol, decimals, balance }
+  })
 }
 
 // ─── Application layer ────────────────────────────────────────────────────────
