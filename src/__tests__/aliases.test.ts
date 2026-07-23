@@ -202,6 +202,30 @@ describe('F10: executor: alias + F11: bulk renames', () => {
     })
   })
 
+  describe('resolveErc20Bulk with empty entries + both/neither (P1 fix)', () => {
+    it('throws with both executor and client even on empty entries', async () => {
+      const executor = mockExecutor([])
+
+      await expect(
+        resolveErc20Bulk({
+          executor,
+          client: executor,
+          entries: [],
+        } as any),
+      ).rejects.toThrow(
+        "Pass either 'executor' or 'client', not both — they are aliases ('client' is deprecated)",
+      )
+    })
+
+    it('throws with neither executor nor client on empty entries', async () => {
+      await expect(
+        resolveErc20Bulk({
+          entries: [],
+        } as any),
+      ).rejects.toThrow("Missing 'executor' or 'client' parameter")
+    })
+  })
+
   describe('resolveErc4626Vault with executor: form', () => {
     it('accepts executor: param and resolves', async () => {
       const executor = mockExecutor([
@@ -362,6 +386,30 @@ describe('F10: executor: alias + F11: bulk renames', () => {
   describe('Alias identity: resolveErc4626VaultsBulk === resolveErc4626Bulk', () => {
     it('resolveErc4626VaultsBulk is the same function as resolveErc4626Bulk (deprecated alias)', () => {
       expect(resolveErc4626VaultsBulk).toBe(resolveErc4626Bulk)
+    })
+  })
+
+  describe('resolveErc4626Bulk with empty entries + both/neither (P1 fix)', () => {
+    it('throws with both executor and client even on empty entries', async () => {
+      const executor = mockExecutor([])
+
+      await expect(
+        resolveErc4626Bulk({
+          executor,
+          client: executor,
+          entries: [],
+        } as any),
+      ).rejects.toThrow(
+        "Pass either 'executor' or 'client', not both — they are aliases ('client' is deprecated)",
+      )
+    })
+
+    it('throws with neither executor nor client on empty entries', async () => {
+      await expect(
+        resolveErc4626Bulk({
+          entries: [],
+        } as any),
+      ).rejects.toThrow("Missing 'executor' or 'client' parameter")
     })
   })
 

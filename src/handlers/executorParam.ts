@@ -13,8 +13,16 @@ import type { StepExecutor } from '../core/types'
  * passing both throws at runtime.
  */
 export type ExecutorParam =
-  | { executor: StepExecutor; /** @deprecated use `executor` */ client?: never }
-  | { /** @deprecated use `executor` */ client: StepExecutor; executor?: never }
+  | {
+      executor: StepExecutor
+      /** @deprecated Use `executor` instead — alias kept through all of 1.x. */
+      client?: never
+    }
+  | {
+      /** @deprecated Use `executor` instead — alias kept through all of 1.x. */
+      client: StepExecutor
+      executor?: never
+    }
 
 /**
  * Runtime guard: extract executor from params, ensuring exclusive union contract.

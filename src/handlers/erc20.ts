@@ -166,8 +166,8 @@ export async function resolveErc20Bulk(
     block?: BlockParam
   },
 ): Promise<Erc20TokenResolution[]> {
-  if (params.entries.length === 0) return []
   const executor = resolveExecutor(params)
+  if (params.entries.length === 0) return []
   const tasks = params.entries.map((e) => {
     return e.owner !== undefined
       ? buildErc20Task({ token: e.token, owner: e.owner as Address })

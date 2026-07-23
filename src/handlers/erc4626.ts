@@ -281,8 +281,8 @@ export async function resolveErc4626Bulk(
     block?: BlockParam
   },
 ): Promise<Erc4626VaultResolution[]> {
-  if (params.entries.length === 0) return []
   const executor = resolveExecutor(params)
+  if (params.entries.length === 0) return []
   const tasks = params.entries.map((e) => {
     return e.owner !== undefined
       ? buildErc4626Task({ vault: e.vault, owner: e.owner as Address })
