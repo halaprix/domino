@@ -33,7 +33,7 @@ npm install @halaprix/domino
 
 Multicall is great for batched reads. But what about when step 2 needs step 1's result?
 
-`defineTask` lets you describe that dependency directly: call something, get back a `Ref` to its result, feed the `Ref` straight into the next call's `args` (or even its `target`). domino works out how many steps that graph needs, batches each step into one multicall, and resolves every `Ref` before handing you back a plain typed object.
+`defineTask` lets you describe that dependency directly: call something, get back a `Ref` to its result, feed the `Ref` straight into the next call's `args` (or even its `target`). domino works out how many steps that graph needs, executes one multicall per step batch (a step with more calls than `batchSize` splits into several sequential batches), and resolves every `Ref` before handing you back a plain typed object.
 
 ```typescript
 import { createPublicClient, http } from "viem"
@@ -258,7 +258,7 @@ Works with `blockHash`, `blockTag`, or `blockNumber`. Even on chains where Multi
 | `resolveErc20Bulk()` | Bulk ERC20 (canonical name — `resolveErc20TokensBulk` is a deprecated alias) |
 | `resolveErc4626Vault()` | One-shot ERC4626: `{ metadata: { symbol, decimals, ... }, position: { balance, assets } \| undefined }` |
 | `resolveErc4626Bulk()` | Bulk ERC4626 (canonical name — `resolveErc4626VaultsBulk` is a deprecated alias) |
-| `executor:` | Preferred param name on every resolver/handler function — `client:` still works but is deprecated |
+| `executor:` | Preferred param name on the four standalone `resolve*` functions (`resolveErc20Token`, `resolveErc20Bulk`, `resolveErc4626Vault`, `resolveErc4626Bulk`) — `client:` still works there but is deprecated. `MulticallResolver` methods don't take it per-call; the executor is passed once, to the constructor. |
 | `BlockParam` | `{ blockNumber } \| { blockTag } \| { blockHash }` (one of three) |
 
 ## Documentation

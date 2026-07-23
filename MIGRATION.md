@@ -63,7 +63,7 @@ const oldVault = await resolveErc4626Vault({
 
 ## v1.0.x → v1.1.0
 
-**No breaking changes.** Every 1.0.x program keeps working unmodified — this section is a guide to the new recommended surface, not a required migration.
+**Source-compatible, with one new runtime restriction.** Every 1.0.x program that builds a fresh task per run (the pattern every built-in convenience function — `resolveErc20Token`, `resolveErc4626Bulk`, etc. — already followed internally) keeps working unmodified. The one behavior change: domino-built task instances (`defineTask`, `buildErc20Task`, `buildErc4626Task` output) are now enforced single-run — submitting the same instance to `runMultistepTasks`/`runSettled` a second time throws `DominoTaskReuseError` instead of silently running again. Reusing such an instance was already unsound in 1.0.x (it closes over mutable per-run state, so a second run could silently mix stale and fresh data rather than erroring); 1.1.0 turns that latent bug into a loud failure. If you were holding onto a built task instance and reusing it across runs, switch to calling the builder/factory fresh for each run (see [Single-run task contract](#single-run-task-contract) below) — this section otherwise remains a guide to the new recommended surface, not a required migration.
 
 ### New: `defineTask` — describe dependent calls directly
 

@@ -81,8 +81,12 @@ const task = defineTask((t) => {
 
   // Dynamic target: `underlying` (Ref<Address | undefined>) feeds the
   // TARGET position of another call. Resolved first; this call is skipped
-  // automatically if `underlying` failed or resolved to undefined.
-  const underlyingSymbol = t.call({ target: underlying, abi: erc20Abi, functionName: "symbol" })
+  // automatically if `underlying` failed or resolved to undefined. It is
+  // ALSO marked `optional: true` here — a skip-chained failure is still a
+  // hard failure unless the consuming call itself opts out of rejecting the
+  // task, so keeping an optional chain resilient end-to-end means every
+  // link in it needs `optional: true`, not just the first one.
+  const underlyingSymbol = t.call({ target: underlying, abi: erc20Abi, functionName: "symbol", optional: true })
 
   // t.derive computes a value locally from already-resolved Refs — no RPC call.
   const hasBalance = t.derive([balance], (bal) => bal > 0n)
@@ -91,7 +95,7 @@ const task = defineTask((t) => {
 })
 ```
 
-`task`'s inferred result type is `{ balance: bigint; assets: bigint; underlying: Address | undefined; underlyingSymbol: string | undefined; hasBalance: boolean }` — `ResolveRefs<S>` walks the shape your builder returns and swaps every `Ref<T>` leaf for `T`, recursively through plain objects, arrays, and tuples. It does not (and `finalize()` at runtime does not either) descend into a `Ref` nested inside a class instance or other non-plain object — return refs through plain objects/arrays/tuples instead.
+`task`'s inferred result type is `{ balance: bigint; assets: bigint; underlying: Address | undefined; underlyingSymbol: string | undefined; hasBalance: boolean }` — `ResolveRefs<S>` walks the shape your builder returns and swaps every `Ref<T>` leaf for `T`, recursively through plain objects, arrays, and tuples. (Had `underlyingSymbol` above been left non-optional, it would still type-check — `Ref<string>`, not `Ref<string | undefined>` — but the *task* would reject whenever `underlying` failed: a skip-chained failure into a non-optional call is a hard failure, not a graceful `undefined`.) See [`ResolveRefs`: type vs. runtime on class instances](#resolverefs-type-vs-runtime-on-class-instances) below for the one case `ResolveRefs` and `finalize()` disagree on.
 
 ### `t.call` — `TypedCallSpec` fields
 
@@ -122,6 +126,26 @@ interface TaskBuilderDerive {
 ### `Ref<T>` and dynamic targets
 
 `Ref<T>` is opaque — there is no way to construct one directly or read its value out; the only way to get a real value is to return it from the builder callback and let `finalize()` resolve it. `WithRefs<T>` is what makes a `Ref` assignable at every `args` tuple position (`element | Ref<element | undefined>`), and `target` accepts `Address | Ref<Address | undefined>` for the same reason — so an `optional: true` call's ref can feed a dynamic target, and the runtime's skip-chain rule (above) handles an actual `undefined` resolution.
+
+### `ResolveRefs`: type vs. runtime on class instances
+
+`ResolveRefs<S>` walks the shape your builder returns and swaps every `Ref<T>` leaf for `T`, recursively through plain objects, arrays, and tuples — **and, at the type level, through class instance types too**, since a mapped type (`{ [K in keyof S]: ResolveRefs<S[K]> }`) is purely structural and doesn't distinguish a class instance's type from a plain object's:
+
+```typescript
+import type { Ref, ResolveRefs } from "@halaprix/domino"
+
+class Box<T> {
+  constructor(public value: T) {}
+}
+
+// Resolved is { value: bigint } — the TYPE-level mapping descends into
+// Box's field and unwraps the Ref, same as it would for a plain object.
+type Resolved = ResolveRefs<Box<Ref<bigint>>>
+```
+
+The **runtime** does not follow the type this far. `finalize()`'s actual resolution (`resShape`) only recurses into arrays and genuinely plain objects (prototype `Object.prototype` or `null`) — for anything else (a class instance, a `Map`, a `Date`, …) it does not resolve at all. Instead it runs one shallow safety check: if any of that object's own top-level enumerable properties is itself a `Ref`, it throws (`"Refs inside class instances/non-plain objects are not supported in the returned shape — use plain objects/arrays"`) rather than silently returning an unresolved ref. So returning `new Box(someRef)` directly from the builder throws at `finalize()` time, even though `ResolveRefs<Box<Ref<T>>>` type-checks as `{ value: T }`.
+
+That shallow check only catches a `Ref` at the object's *own* top level — a `Ref` nested two or more levels deep inside a non-plain object (e.g. `new Box({ inner: someRef })`) is not detected by either the type or the runtime check, and silently passes through with the ref unresolved. Return refs through plain objects/arrays/tuples instead of class instances to avoid both failure modes.
 
 ### Single-use contract
 
@@ -329,14 +353,17 @@ import { buildErc20Task, MulticallResolver } from "@halaprix/domino"
 declare const resolver: MulticallResolver
 
 // Use built-in task builders
-const erc20Tasks = [
+const [token] = await resolver.run([
   buildErc20Task({ token: "0x1111111111111111111111111111111111111111" as const }),
-]
+])
 
-const [token] = await resolver.run(erc20Tasks)
-
-// Per-task settlement instead of one bad task aborting the whole call:
-const settled = await resolver.runSettled(erc20Tasks)
+// Per-task settlement instead of one bad task aborting the whole call.
+// A FRESH array/instance, not the one above — buildErc20Task output is
+// single-use, so reusing the same instance across two run()/runSettled()
+// calls would throw DominoTaskReuseError (see below).
+const settled = await resolver.runSettled([
+  buildErc20Task({ token: "0x1111111111111111111111111111111111111111" as const }),
+])
 ```
 
 Remember: `buildErc20Task`/`buildErc4626Task`/`defineTask` output is single-use (see [Single-use contract](#single-use-contract) above) — build a fresh array of tasks for each `run`/`runSettled` call, exactly as the snippet above does.
@@ -443,7 +470,7 @@ Import the following directly from `@halaprix/domino` (this list is exhaustive �
 - `executeMulticall(calls: StepCall[], block?: BlockParam): Promise<RawResult[]>`
 - `refreshChainId(): Promise<number>`
 
-**MulticallResolver class:**
+**`MulticallResolver<TAddr extends string = Address>` class** (implements `ResolverEngine<TAddr>`; signatures below use the default `TAddr = Address`):
 - `constructor(executor: StepExecutor)`
 - `get executor(): StepExecutor`
 - `run<T>(tasks: MultistepTask<T>[], options?: BatchOptions): Promise<T[]>`
@@ -452,8 +479,8 @@ Import the following directly from `@halaprix/domino` (this list is exhaustive �
 - `resolveErc20Bulk(params: { entries: { token: Address; owner?: Address }[]; batchSize?: number; block?: BlockParam }): Promise<Erc20TokenResolution[]>`
 - `resolveErc4626(params: { vault: Address; owner?: Address; block?: BlockParam }): Promise<Erc4626VaultResolution>`
 - `resolveErc4626Bulk(params: { entries: { vault: Address; owner?: Address }[]; batchSize?: number; block?: BlockParam }): Promise<Erc4626VaultResolution[]>`
-- `makeResolver<TAddr>(executor: StepExecutor): ResolverEngine<TAddr>` — `@deprecated`, equivalent to `new MulticallResolver(executor)`
-- `ResolverEngine<TAddr>` — the interface `MulticallResolver` implements
+- `makeResolver<TAddr extends string = Address>(executor: StepExecutor): ResolverEngine<TAddr>` — `@deprecated`, equivalent to `new MulticallResolver(executor)`
+- `ResolverEngine<TAddr extends string = Address>` — the interface `MulticallResolver` implements. `TAddr` is the address representation the engine's params accept — `Address` (`0x${string}`) by default, or plain `string` for an engine (e.g. ethers v5) that doesn't use the `0x${string}` template-literal type.
 
 **Constants and deployment helpers:**
 - `MULTICALL3_ADDRESS: Address`
