@@ -3,6 +3,27 @@
 All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.3.0] — 2026-07-23
+
+### Added
+- `MultichainResolver` — parallel per-chain execution with `chain()` builder, `snapshot()` for atomicity, `runAll`/`runAllSettled` entry points, per-chain `blocks` pinning, per-chain `onPin` callback, and flattened duplicate-instance validation before any chain executes. Lowest-chainId rejection rule for invalid chain identifiers. Single-T generic over result shape per call (mixed shapes require separate invocations).
+- `MultichainRunOptions` — batch options wrapper with per-chain customization (`blocks`, `onPin`).
+- `examples/refinance.ts` — Aave v3 + Spark + Morpho Blue dynamic-target refinance comparison across Ethereum mainnet and Base (optional via `RPC_URL_8453`); demonstrates `defineTask`, `Presets.throughput`, `MultichainResolver`, and per-chain block pinning. Type-checked in CI against the built dist.
+
+### Changed
+- **Handler implementation** — ERC20 and ERC4626 handlers reimplemented on `defineTask` (internal structure change; public signatures identical, source-compatible).
+  - **Observable deltas** (all aligned with legacy behavior for backward compatibility):
+    - `runSettled` now retains per-call errors in task diagnostics for handler tasks (formerly dropped). Populated via `TaskDiagnostics.optionalFailures` only for `defineTask` output; legacy hand-written tasks return empty `[]`.
+    - Handler calls are now dedup-eligible (under `dedupe: true`) when built via `defineTask`; legacy tasks are unaffected (never merged).
+    - Malformed executor values still resolve to `undefined` (coercion parity with legacy).
+  - **Bundle size** — gzip ceiling now 15→18 KB (multichain feature class added; current ~17.2 KB measured).
+
+### Internal
+- Legacy handler oracle retained under `src/__tests__/fixtures/legacy-handlers/` for one release cycle, then removed.
+
+### Deprecated
+- (No new deprecations; see 1.1.0 and 1.0.x MIGRATION sections for prior changes.)
+
 ## [1.2.0] — 2026-07-23
 
 ### Added
@@ -118,6 +139,7 @@ First public release of `@halaprix/domino`.
 - `position.assets` is `bigint | undefined` — correctly represents the case where `balanceOf` succeeds but `convertToAssets` reverts.
 - CI now runs real `tsc --noEmit` (typecheck); build step runs before tests so `dist/` exists for bundle-size checks on a clean checkout.
 
+[1.3.0]: https://github.com/halaprix/domino/releases/tag/v1.3.0
 [1.2.0]: https://github.com/halaprix/domino/releases/tag/v1.2.0
 [1.1.0]: https://github.com/halaprix/domino/releases/tag/v1.1.0
 [1.0.1]: https://github.com/halaprix/domino/releases/tag/v1.0.1

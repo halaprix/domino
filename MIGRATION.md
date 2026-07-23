@@ -1,4 +1,55 @@
-# Migration Guide — v0.1.0 → v1.0.0
+# Migration Guide
+
+## v1.2.x → v1.3.0
+
+**Fully additive — no consumer action required.** All 1.2.x code keeps working unchanged.
+
+### What's new
+
+- **`MultichainResolver`** — parallel per-chain task execution with `runAll()`/`runAllSettled()` and optional atomic block snapshots via `snapshot()`. No changes to existing single-chain code.
+- **Handler internals** — ERC20 and ERC4626 handlers reimplemented on `defineTask` (internal change; public signatures identical, behavior backward-compatible).
+  - Observable delta in `runSettled`: handler tasks now populate `TaskDiagnostics.optionalFailures` with per-call errors (formerly omitted).
+  - Handler calls are dedup-eligible under `dedupe: true` (newly, though the feature itself is unchanged).
+  - No consumer code needs updating.
+
+### Example: multichain snapshot
+
+```typescript
+import { createPublicClient, http } from "viem"
+import { mainnet, base } from "viem/chains"
+import { Eip1193Executor, MultichainResolver, defineTask } from "@halaprix/domino"
+import type { Address } from "@halaprix/domino"
+
+declare const vaultAddress: Address
+declare const ownerAddress: Address
+
+const resolver = new MultichainResolver({
+  [mainnet.id]: new Eip1193Executor(createPublicClient({ chain: mainnet, transport: http() })),
+  [base.id]: new Eip1193Executor(createPublicClient({ chain: base, transport: http() })),
+})
+
+// Snapshot block numbers per chain (atomic)
+const blocks = await resolver.snapshot()
+
+// Execute the same task on each chain
+const vaultAbi = [
+  "function balanceOf(address) view returns (uint256)",
+] as const
+
+const makeTasks = () => [
+  defineTask((t) => ({
+    balance: t.call({ target: vaultAddress, abi: vaultAbi, functionName: "balanceOf", args: [ownerAddress] }),
+  })),
+]
+
+// Execute tasks with pinned per-chain blocks
+const results = await resolver.runAll({
+  [mainnet.id]: makeTasks(),
+  [base.id]: makeTasks(),
+}, { blocks: Object.fromEntries(Object.entries(blocks).map(([cid, num]) => [cid, { blockNumber: num }])) })
+```
+
+## v0.1.0 → v1.0.0
 
 ## What changed
 

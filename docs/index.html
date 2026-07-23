@@ -1,569 +1,163 @@
 <!DOCTYPE html>
-
-<html class="dark" lang="en"><head>
-<meta charset="utf-8"/>
-<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-<title>domino — sequential on-chain reads</title>
-<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-<script src="https://cdn.jsdelivr.net/npm/ethers@6.9.0/dist/ethers.umd.min.js"></script>
-<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=JetBrains+Mono:wght@100..900&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<script id="tailwind-config">
-        tailwind.config = {
-            darkMode: "class",
-            theme: {
-                extend: {
-                    "colors": {
-                        "secondary-container": "#49484e",
-                        "tertiary-fixed": "#e4e1ed",
-                        "outline-variant": "#464554",
-                        "on-primary-fixed": "#07006c",
-                        "primary": "#c0c1ff",
-                        "secondary-fixed-dim": "#c8c5cd",
-                        "error": "#ffb4ab",
-                        "on-secondary": "#303036",
-                        "on-tertiary-fixed": "#1b1b23",
-                        "tertiary-container": "#918f9a",
-                        "surface-container": "#192029",
-                        "inverse-surface": "#dce3f0",
-                        "surface-container-lowest": "#080f17",
-                        "tertiary-fixed-dim": "#c7c5d0",
-                        "on-surface-variant": "#c7c4d7",
-                        "surface-dim": "#0d141d",
-                        "surface-tint": "#c0c1ff",
-                        "background": "#0d141d",
-                        "on-surface": "#dce3f0",
-                        "on-secondary-container": "#bab7be",
-                        "on-secondary-fixed": "#1b1b20",
-                        "primary-fixed": "#e1e0ff",
-                        "on-tertiary": "#303038",
-                        "secondary": "#c8c5cd",
-                        "on-primary-container": "#0d0096",
-                        "on-tertiary-fixed-variant": "#46464f",
-                        "on-tertiary-container": "#292931",
-                        "on-error-container": "#ffdad6",
-                        "inverse-primary": "#494bd6",
-                        "surface-container-low": "#151c25",
-                        "tertiary": "#c7c5d0",
-                        "on-primary-fixed-variant": "#2f2ebe",
-                        "surface-container-highest": "#2e353f",
-                        "on-background": "#dce3f0",
-                        "secondary-fixed": "#e4e1e9",
-                        "on-primary": "#1000a9",
-                        "surface-variant": "#2e353f",
-                        "primary-fixed-dim": "#c0c1ff",
-                        "outline": "#908fa0",
-                        "on-secondary-fixed-variant": "#47464c",
-                        "primary-container": "#8083ff",
-                        "surface": "#0d141d",
-                        "error-container": "#93000a",
-                        "surface-container-high": "#232a34",
-                        "surface-bright": "#333a44",
-                        "inverse-on-surface": "#2a313b",
-                        "on-error": "#690005",
-                        "accent-glow": "#6366f1"
-                    },
-                    "borderRadius": {
-                        "DEFAULT": "0.125rem",
-                        "lg": "0.25rem",
-                        "xl": "0.5rem",
-                        "full": "0.75rem"
-                    },
-                    "spacing": {
-                        "container-max": "1200px",
-                        "lg": "48px",
-                        "base": "4px",
-                        "xl": "80px",
-                        "md": "24px",
-                        "sm": "16px",
-                        "gutter": "24px",
-                        "xs": "8px"
-                    },
-                    "fontFamily": {
-                        "headline-lg": ["Geist"],
-                        "headline-lg-mobile": ["Geist"],
-                        "label-caps": ["JetBrains Mono"],
-                        "body-md": ["Geist"],
-                        "code-block": ["JetBrains Mono"],
-                        "body-lg": ["Geist"],
-                        "headline-md": ["Geist"]
-                    },
-                    "fontSize": {
-                        "headline-lg": ["48px", { "lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700" }],
-                        "headline-lg-mobile": ["32px", { "lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "700" }],
-                        "label-caps": ["12px", { "lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600" }],
-                        "body-md": ["16px", { "lineHeight": "24px", "fontWeight": "400" }],
-                        "code-block": ["14px", { "lineHeight": "20px", "fontWeight": "400" }],
-                        "body-lg": ["18px", { "lineHeight": "28px", "fontWeight": "400" }],
-                        "headline-md": ["32px", { "lineHeight": "40px", "letterSpacing": "-0.01em", "fontWeight": "600" }]
-                    }
-                }
-            }
-        }
-    </script>
-<style>
-        .code-container {
-            background-color: #16161e;
-            border: 1px solid #26262e;
-        }
-        .glow-hover:hover {
-            box-shadow: 0 0 20px rgba(99, 102, 241, 0.4);
-        }
-        .feature-card {
-            background: linear-gradient(180deg, #1c1c24 0%, #16161e 100%);
-            border: 1px solid #26262e;
-        }
-        body {
-            background-color: #0a0a0f;
-        }
-    </style>
+<html class="dark" lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>domino — sequential on-chain reads</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=JetBrains+Mono:wght@100..900&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
+  <style>
+    .code-container {
+      background-color: #16161e;
+      border: 1px solid #26262e;
+    }
+    .glow-hover:hover {
+      box-shadow: 0 0 20px rgba(99, 102, 241, 0.4);
+    }
+    .feature-card {
+      background: linear-gradient(180deg, #1c1c24 0%, #16161e 100%);
+      border: 1px solid #26262e;
+    }
+    body {
+      background-color: #0a0a0f;
+    }
+  </style>
 </head>
-<body class="bg-background text-on-background font-body-md antialiased overflow-x-hidden min-h-screen flex flex-col">
-<!-- TopNavBar -->
-<nav class="fixed top-0 inset-x-0 z-50 flex justify-between items-center px-gutter max-w-container-max mx-auto h-16 bg-background border-b border-outline-variant transition-all duration-200 ease-in-out">
-<div class="font-headline-md text-headline-md font-bold text-on-background tracking-tight">domino</div>
-<div class="hidden md:flex gap-md items-center">
-<a class="text-on-surface-variant hover:text-primary transition-colors font-body-md text-body-md" href="https://github.com/halaprix/domino/blob/main/docs/api-reference.md">Docs</a>
-<a class="text-on-surface-variant hover:text-primary transition-colors font-body-md text-body-md" href="#demo">Demo</a>
-<a class="text-on-surface-variant hover:text-primary transition-colors font-body-md text-body-md" href="https://github.com/halaprix/domino/blob/main/docs/benchmarks.md">Benchmarks</a>
-<a class="text-on-surface-variant hover:text-primary transition-colors font-body-md text-body-md" href="https://github.com/halaprix/domino">GitHub</a>
-<span class="ml-sm font-label-caps text-label-caps bg-primary/10 text-primary px-2 py-1 rounded">v0.1.0</span>
-</div>
-</nav>
-<main class="flex-grow pt-32 pb-xl px-gutter max-w-container-max mx-auto w-full">
-<!-- Hero Section -->
-<section class="text-center max-w-4xl mx-auto mb-xl">
-<div class="inline-flex items-center gap-2 mb-sm px-3 py-1 rounded-full border border-primary/20 bg-primary/5 text-primary font-label-caps text-label-caps">
-<span class="material-symbols-outlined text-[16px]">bolt</span> Batched on-chain reads
-            </div>
-<h1 class="font-headline-lg-mobile md:font-headline-lg text-headline-lg-mobile md:text-headline-lg mb-md text-white">
-                Batched on-chain reads.<br/>
-<span class="text-transparent bg-clip-text bg-gradient-to-r from-primary to-inverse-primary">Without the compromise.</span>
-</h1>
-<p class="font-body-lg text-body-lg text-on-surface-variant mb-lg max-w-2xl mx-auto">
-                domino solves the N×M RPC problem. Sequential, self-triggering on-chain reads — resolved in M multicalls, not N×M individual calls.
-            </p>
-<div class="flex flex-col sm:flex-row gap-sm justify-center items-center">
-<a class="px-6 py-3 bg-inverse-primary text-white rounded-md font-body-md text-body-md font-semibold glow-hover transition-all" href="https://github.com/halaprix/domino#readme">Get started</a>
-<a class="px-6 py-3 border border-outline-variant hover:border-primary hover:text-primary text-on-surface rounded-md font-body-md text-body-md transition-all flex items-center gap-2" href="#demo"><span class="material-symbols-outlined text-[18px]">rocket_launch</span> Try the demo</a>
-</div>
-</section>
-<!-- Stats Bar -->
-<section class="mb-xl">
-<div class="flex flex-wrap justify-center gap-sm md:gap-lg py-md border-y border-outline-variant/50">
-<div class="flex items-center gap-2 font-label-caps text-label-caps text-on-surface-variant">
-<span class="material-symbols-outlined text-primary">data_object</span> 2.1KB gzipped (viem)
-                </div>
-<div class="flex items-center gap-2 font-label-caps text-label-caps text-on-surface-variant">
-<span class="material-symbols-outlined text-primary">code</span> 2.4KB gzipped (ethers-v5)
-                </div>
-<div class="flex items-center gap-2 font-label-caps text-label-caps text-on-surface-variant">
-<span class="material-symbols-outlined text-primary">check_circle</span> 53 tests passing
-                </div>
-<div class="flex items-center gap-2 font-label-caps text-label-caps text-on-surface-variant">
-<span class="material-symbols-outlined text-primary">hub</span> viem ^2 · ethers ^5/^6
-                </div>
-<div class="flex items-center gap-2 font-label-caps text-label-caps text-on-surface-variant">
-<span class="material-symbols-outlined text-primary">gavel</span> MIT License
-                </div>
-</div>
-</section>
-<!-- Comparison Section -->
-<section class="mb-xl">
-<h2 class="font-headline-md text-headline-md text-white mb-md text-center">Stop making N×M calls</h2>
-<div class="grid md:grid-cols-2 gap-md">
-<!-- The Problem -->
-<div class="code-container rounded-lg p-sm relative group">
-<div class="absolute top-0 left-0 w-full px-sm py-xs border-b border-outline-variant/50 flex justify-between items-center bg-surface-container-highest/20">
-<span class="font-label-caps text-label-caps text-error flex items-center gap-2"><span class="material-symbols-outlined text-[16px]">close</span> The problem</span>
-</div>
-<pre class="pt-10 font-code-block text-code-block overflow-x-auto text-on-surface-variant"><span class="text-inverse-primary">for</span> (<span class="text-primary">const</span> vault <span class="text-inverse-primary">of</span> vaults) {
-  <span class="text-outline">// Call 1: get user's vault shares</span>
-  <span class="text-primary">const</span> shares = <span class="text-inverse-primary">await</span> vault.balanceOf(user);
-  
-  <span class="text-outline">// Call 2: convert to assets (depends on Call 1 output)</span>
-  <span class="text-primary">const</span> assets = <span class="text-inverse-primary">await</span> vault.convertToAssets(shares);
-  
-  <span class="text-outline">// Call 3: get underlying asset</span>
-  <span class="text-primary">const</span> token = <span class="text-inverse-primary">await</span> vault.asset();
-}</pre>
-</div>
-<!-- The Solution -->
-<div class="code-container rounded-lg p-sm relative group border-primary/30 shadow-[0_0_15px_rgba(99,102,241,0.1)]">
-<div class="absolute top-0 left-0 w-full px-sm py-xs border-b border-outline-variant/50 flex justify-between items-center bg-surface-container-highest/20">
-<span class="font-label-caps text-label-caps text-primary flex items-center gap-2"><span class="material-symbols-outlined text-[16px]">check</span> The solution</span>
-<button class="text-on-surface-variant hover:text-primary transition-colors opacity-0 group-hover:opacity-100"><span class="material-symbols-outlined text-[16px]">content_copy</span></button>
-</div>
-<pre class="pt-10 font-code-block text-code-block overflow-x-auto text-on-surface-variant"><span class="text-outline">// 1 single batched multicall</span>
-<span class="text-primary">const</span> results = <span class="text-inverse-primary">await</span> resolver.resolveBatch(
-  vaults.map(v =&gt; ({ 
-    vault: v, 
-    owner: user 
-  }))
-);</pre>
-</div>
-</div>
-</section>
-<!-- Features Grid -->
-<section class="mb-xl">
-<div class="grid md:grid-cols-3 gap-md">
-<div class="feature-card rounded-lg p-md hover:border-primary/50 transition-colors">
-<div class="w-10 h-10 rounded bg-primary/10 flex items-center justify-center mb-sm text-primary">
-<span class="material-symbols-outlined">account_tree</span>
-</div>
-<h3 class="font-body-lg text-body-lg font-bold text-white mb-xs">FSM executor</h3>
-<p class="font-body-md text-body-md text-on-surface-variant">Results from step N flow automatically into step N+1. Build complex read pipelines.</p>
-</div>
-<div class="feature-card rounded-lg p-md hover:border-primary/50 transition-colors">
-<div class="w-10 h-10 rounded bg-primary/10 flex items-center justify-center mb-sm text-primary">
-<span class="material-symbols-outlined">extension</span>
-</div>
-<h3 class="font-body-lg text-body-lg font-bold text-white mb-xs">Framework agnostic</h3>
-<p class="font-body-md text-body-md text-on-surface-variant">First-class support for viem, ethers v6, and ethers v5. Fully tree-shaken.</p>
-</div>
-<div class="feature-card rounded-lg p-md hover:border-primary/50 transition-colors">
-<div class="w-10 h-10 rounded bg-primary/10 flex items-center justify-center mb-sm text-primary">
-<span class="material-symbols-outlined">speed</span>
-</div>
-<h3 class="font-body-lg text-body-lg font-bold text-white mb-xs">Zero dependencies</h3>
-<p class="font-body-md text-body-md text-on-surface-variant">Relies only on Multicall3 on-chain. Incredibly lightweight footprint.</p>
-</div>
-</div>
-</section>
-<section class="mb-xl" id="demo">
-<h2 class="font-headline-md text-headline-md text-white mb-sm">Interactive Demo</h2>
-<div class="code-container rounded-lg p-md relative" id="demo-container">
-<!-- Demo header with rocket icon -->
-<div class="flex items-center gap-2 mb-md">
-<span class="material-symbols-outlined text-primary text-2xl">rocket_launch</span>
-<span class="font-label-caps text-label-caps text-primary">LIVE ON-CHAIN</span>
-</div>
-
-<!-- Wallet connection state machine -->
-<div id="fsm-root">
-<!-- FSM states rendered by JS -->
-</div>
-
-<!-- Inline FSM + ABIs (self-contained until npm published) -->
-<script>
-(function() {
-'use strict';
-
-// ============================================================
-// ABIs (inline, matching src/abis/)
-// ============================================================
-const ERC20_ABI = [
-  { "type": "function", "name": "decimals", "stateMutability": "view", "inputs": [], "outputs": [{ "type": "uint8" }] },
-  { "type": "function", "name": "symbol", "stateMutability": "view", "inputs": [], "outputs": [{ "type": "string" }] },
-  { "type": "function", "name": "balanceOf", "stateMutability": "view", "inputs": [{ "type": "address", "name": "account" }], "outputs": [{ "type": "uint256" }] }
-];
-
-const ERC4626_ABI = [
-  { "type": "function", "name": "asset", "stateMutability": "view", "inputs": [], "outputs": [{ "type": "address" }] },
-  { "type": "function", "name": "maxWithdraw", "stateMutability": "view", "inputs": [{ "type": "address", "name": "owner" }], "outputs": [{ "type": "uint256" }] },
-  { "type": "function", "name": "maxRedeem", "stateMutability": "view", "inputs": [{ "type": "address", "name": "owner" }], "outputs": [{ "type": "uint256" }] },
-  { "type": "function", "name": "convertToAssets", "stateMutability": "view", "inputs": [{ "type": "uint256", "name": "shares" }], "outputs": [{ "type": "uint256" }] }
-];
-
-const MULTICALL3_ABI = [
-  { "type": "function", "name": "aggregate3", "stateMutability": "payable", "inputs": [{ "type": "tuple[]", "name": "calls", "components": [{ "type": "address", "name": "target", "internalType": "address" }, { "type": "bool", "name": "allowFailure", "internalType": "bool" }, { "type": "bytes", "name": "callData", "internalType": "bytes" }] }], "outputs": [{ "type": "tuple[]", "name": "results", "components": [{ "type": "bool", "name": "success", "internalType": "bool" }, { "type": "bytes", "name": "returnData", "internalType": "bytes" }] }] }
-];
-
-const MULTICALL3_ADDRESS = '0xcA11bde05977b3631167028862bE2a173976CA11';
-
-// ============================================================
-// FSM State Machine
-// ============================================================
-const FSM_STATES = {
-  READY: 'ready',
-  DEMO_RUNNING: 'demo_running',
-  DEMO_SUCCESS: 'demo_success',
-  DEMO_ERROR: 'demo_error'
-};
-
-// ============================================================
-// Multicall3 Executor (inline FSM)
-// ============================================================
-class Multicall3Executor {
-  constructor(provider) {
-    this.provider = provider;
-    this.multicall = new ethers.Contract(MULTICALL3_ADDRESS, MULTICALL3_ABI, provider);
-  }
-
-  async executeMulticall(calls) {
-    const callsFormatted = calls.map(call => ({
-      target: call.target,
-      callData: encodeCall(call.functionName, call.abi, call.args || []),
-      allowFailure: true
-    }));
-
-    const results = await this.multicall.aggregate3.staticCall(callsFormatted);
-    return results.map((r, i) => ({
-      status: r.success ? 'success' : 'failure',
-      value: r.success ? decodeResult(calls[i], r.returnData) : null
-    }));
-  }
-}
-
-function encodeCall(functionName, abi, args) {
-  const iface = new ethers.Interface(abi);
-  return iface.encodeFunctionData(functionName, args);
-}
-
-function decodeResult(call, returnData) {
-  try {
-    const iface = new ethers.Interface(call.abi);
-    return iface.decodeFunctionResult(call.functionName, returnData);
-  } catch {
-    return null;
-  }
-}
-
-// ============================================================
-// Demo FSM
-// ============================================================
-// Read-only demo — no wallet needed. Uses a public mainnet RPC (eth_call only).
-// Fallbacks: https://cloudflare-eth.com, https://rpc.ankr.com/eth
-const PUBLIC_RPC = 'https://0xrpc.io/eth';
-
-let currentState = FSM_STATES.READY;
-let executor = new Multicall3Executor(new ethers.JsonRpcProvider(PUBLIC_RPC));
-let currentStep = 0;
-let stepResults = [];
-let vaultAddress = null;
-let tokenAddress = null;
-
-function resetDemo() {
-  currentStep = 0;
-  stepResults = [];
-  vaultAddress = null;
-  tokenAddress = null;
-  const logs = document.getElementById('step-logs');
-  if (logs) logs.innerHTML = '';
-}
-
-function setState(state) {
-  currentState = state;
-  render();
-}
-
-async function runDemo(vaultAddr) {
-  if (!vaultAddr || !vaultAddr.startsWith('0x')) return;
-  resetDemo();
-  vaultAddress = vaultAddr;
-  setState(FSM_STATES.DEMO_RUNNING);
-
-  try {
-    // Step 1: Get vault asset (token address)
-    const step1Calls = [{
-      target: vaultAddr,
-      functionName: 'asset',
-      abi: ERC4626_ABI
-    }];
-
-    addStepLog('STEP 1', 'Fetching vault asset (token address)...', 'pending');
-    const step1Results = await executor.executeMulticall(step1Calls);
-
-    if (step1Results[0].status === 'failure') {
-      throw new Error('Step 1 failed: vault.asset() reverted');
-    }
-
-    tokenAddress = step1Results[0].value[0];
-    updateStepLog('STEP 1', `asset = ${tokenAddress}`, 'success');
-    stepResults.push({ step: 1, result: tokenAddress });
-
-    // Step 2: Get token decimals + symbol via Multicall3
-    const step2Calls = [
-      { target: tokenAddress, functionName: 'decimals', abi: ERC20_ABI },
-      { target: tokenAddress, functionName: 'symbol', abi: ERC20_ABI }
-    ];
-
-    addStepLog('STEP 2', `Fetching token info for ${tokenAddress}...`, 'pending');
-    const step2Results = await executor.executeMulticall(step2Calls);
-
-    if (step2Results[0].status === 'failure') {
-      throw new Error('Step 2 failed: ERC20 calls reverted');
-    }
-
-    const decimals = step2Results[0].value[0];
-    const symbol = step2Results[1].value[0];
-    updateStepLog('STEP 2', `decimals = ${decimals}, symbol = ${symbol}`, 'success');
-    stepResults.push({ step: 2, result: { decimals, symbol, tokenAddress } });
-
-    setState(FSM_STATES.DEMO_SUCCESS);
-  } catch (err) {
-    renderError('Demo failed: ' + err.message);
-    setState(FSM_STATES.DEMO_ERROR);
-  }
-}
-
-// ============================================================
-// Rendering
-// ============================================================
-function render() {
-  const root = document.getElementById('fsm-root');
-  if (!root) return;
-
-  let html = '';
-
-  switch (currentState) {
-    case FSM_STATES.READY:
-    case FSM_STATES.DEMO_RUNNING:
-    case FSM_STATES.DEMO_SUCCESS:
-    case FSM_STATES.DEMO_ERROR:
-      html = `
-        <div class="flex flex-col gap-md">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <div class="w-2 h-2 bg-green-500 rounded-full"></div>
-              <span class="font-label-caps text-label-caps text-on-surface-variant">live · mainnet · public RPC</span>
-            </div>
+<body class="bg-[#0a0a0f] text-[#dce3f0] font-[Geist] antialiased overflow-x-hidden min-h-screen flex flex-col">
+  <!-- TopNavBar -->
+  <nav class="fixed top-0 inset-x-0 z-50 flex justify-between items-center px-6 max-w-6xl mx-auto h-16 bg-[#0d141d] border-b border-[#464554] transition-all duration-200 ease-in-out">
+    <div class="font-bold text-2xl text-[#dce3f0] tracking-tight">domino</div>
+    <div class="hidden md:flex gap-6 items-center">
+      <a class="text-[#c7c4d7] hover:text-[#c0c1ff] transition-colors text-base" href="https://github.com/halaprix/domino#readme">Docs</a>
+      <a class="text-[#c7c4d7] hover:text-[#c0c1ff] transition-colors text-base" href="https://github.com/halaprix/domino/blob/main/docs/api-reference.md">API Reference</a>
+      <a class="text-[#c7c4d7] hover:text-[#c0c1ff] transition-colors text-base" href="https://github.com/halaprix/domino/blob/main/docs/benchmarks.md">Benchmarks</a>
+      <a class="text-[#c7c4d7] hover:text-[#c0c1ff] transition-colors text-base" href="https://github.com/halaprix/domino">GitHub</a>
+      <span class="ml-4 text-xs font-semibold bg-[#c0c1ff]/10 text-[#c0c1ff] px-2 py-1 rounded tracking-wide">v1.3.0</span>
+    </div>
+  </nav>
+  <main class="flex-grow pt-32 pb-20 px-6 max-w-6xl mx-auto w-full">
+    <!-- Hero Section -->
+    <section class="text-center max-w-4xl mx-auto mb-20">
+      <div class="inline-flex items-center gap-2 mb-4 px-3 py-1 rounded-full border border-[#c0c1ff]/20 bg-[#c0c1ff]/5 text-[#c0c1ff] text-xs font-semibold tracking-wide">
+        <span class="material-symbols-outlined text-base">bolt</span> Batched on-chain reads
+      </div>
+      <h1 class="text-4xl md:text-5xl mb-6 text-white font-bold tracking-tight">
+        Batched on-chain reads.<br />
+        <span class="text-transparent bg-clip-text bg-gradient-to-r from-[#c0c1ff] to-[#494bd6]">Without the compromise.</span>
+      </h1>
+      <p class="text-lg text-[#c7c4d7] mb-8 max-w-2xl mx-auto">
+        domino solves the N×M RPC problem. Sequential, self-triggering on-chain reads — resolved in M multicalls, not N×M individual calls.
+      </p>
+      <div class="flex flex-col sm:flex-row gap-4 justify-center items-center">
+        <a class="px-6 py-3 bg-[#494bd6] text-white rounded font-semibold glow-hover transition-all hover:bg-[#494bd6]/90" href="https://github.com/halaprix/domino#readme">Get Started</a>
+        <a class="px-6 py-3 border border-[#464554] hover:border-[#c0c1ff] hover:text-[#c0c1ff] text-[#c7c4d7] rounded font-semibold transition-all" href="https://github.com/halaprix/domino#api-at-a-glance">View API</a>
+      </div>
+    </section>
+    <!-- Stats Bar -->
+    <section class="mb-20">
+      <div class="flex flex-wrap justify-center gap-4 md:gap-12 py-6 border-y border-[#464554]/50">
+        <div class="flex items-center gap-2 text-xs font-semibold text-[#c7c4d7] tracking-wide">
+          <span class="material-symbols-outlined text-[#c0c1ff]">data_object</span> 16.8 KB gzipped
+        </div>
+        <div class="flex items-center gap-2 text-xs font-semibold text-[#c7c4d7] tracking-wide">
+          <span class="material-symbols-outlined text-[#c0c1ff]">framework_agnostic</span> Any EIP-1193 provider
+        </div>
+        <div class="flex items-center gap-2 text-xs font-semibold text-[#c7c4d7] tracking-wide">
+          <span class="material-symbols-outlined text-[#c0c1ff]">extension</span> Multichain support
+        </div>
+        <div class="flex items-center gap-2 text-xs font-semibold text-[#c7c4d7] tracking-wide">
+          <span class="material-symbols-outlined text-[#c0c1ff]">gavel</span> MIT License
+        </div>
+      </div>
+    </section>
+    <!-- Comparison Section -->
+    <section class="mb-20">
+      <h2 class="text-3xl font-bold text-white mb-6 text-center">Stop making N×M calls</h2>
+      <div class="grid md:grid-cols-2 gap-6">
+        <!-- The Problem -->
+        <div class="code-container rounded px-6 py-6 relative group">
+          <div class="absolute top-0 left-0 w-full px-6 py-3 border-b border-[#464554]/50 flex justify-between items-center bg-[#2e353f]/20">
+            <span class="text-xs font-semibold text-[#ffb4ab] flex items-center gap-2 tracking-wide"><span class="material-symbols-outlined text-base">close</span> THE PROBLEM</span>
           </div>
-          ${renderDemoForm()}
-          ${renderStepLogs()}
-        </div>`;
-      break;
-  }
+          <pre class="pt-10 font-[JetBrains_Mono] text-sm overflow-x-auto text-[#c7c4d7]"><span style="color:#494bd6">for</span> (<span style="color:#c0c1ff">const</span> vault <span style="color:#494bd6">of</span> vaults) {
+  <span style="color:#908fa0">// Call 1: get user's vault shares</span>
+  <span style="color:#c0c1ff">const</span> shares = <span style="color:#494bd6">await</span> vault.balanceOf(user);
 
-  root.innerHTML = html;
-}
+  <span style="color:#908fa0">// Call 2: convert to assets (depends on Call 1)</span>
+  <span style="color:#c0c1ff">const</span> assets = <span style="color:#494bd6">await</span> vault.convertToAssets(shares);
 
-function renderDemoForm() {
-  const isRunning = currentState === FSM_STATES.DEMO_RUNNING;
-  const isSuccess = currentState === FSM_STATES.DEMO_SUCCESS;
-
-  return `
-    <div class="space-y-sm">
-      <label class="block font-label-caps text-label-caps text-on-surface-variant">ERC4626 Vault Address</label>
-      <div class="flex gap-sm">
-        <input id="vault-input" type="text" placeholder="0x..." value="${vaultAddress || ''}" 
-          class="flex-1 bg-surface-container-high border border-outline-variant rounded px-3 py-2 text-on-surface font-code-block text-code-block focus:border-primary focus:outline-none" ${isRunning ? 'disabled' : ''} />
-        <button onclick="window.demoFSM.runDemo(document.getElementById('vault-input').value)" 
-          ${isRunning ? 'disabled' : ''} class="px-4 py-2 bg-primary text-on-primary rounded font-label-caps text-label-caps font-semibold hover:bg-primary/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-          ${isRunning ? 'Running...' : 'Run Demo'}
-        </button>
-      </div>
-      ${isSuccess ? renderSuccessCard() : ''}
-    </div>`;
-}
-
-function renderSuccessCard() {
-  const vaultResult = stepResults.find(s => s.step === 1);
-  const tokenResult = stepResults.find(s => s.step === 2);
-
-  return `
-    <div class="mt-sm p-sm bg-green-500/10 border border-green-500/30 rounded">
-      <div class="flex items-center gap-2 mb-xs">
-        <span class="material-symbols-outlined text-green-500 text-[16px]">check_circle</span>
-        <span class="font-label-caps text-label-caps text-green-500">DEMO COMPLETE</span>
-      </div>
-      <div class="space-y-xs font-code-block text-code-block text-on-surface">
-        <div><span class="text-on-surface-variant">Vault:</span> ${vaultAddress}</div>
-        <div><span class="text-on-surface-variant">Asset:</span> ${tokenResult?.result?.tokenAddress}</div>
-        <div><span class="text-on-surface-variant">Symbol:</span> ${tokenResult?.result?.symbol}</div>
-        <div><span class="text-on-surface-variant">Decimals:</span> ${tokenResult?.result?.decimals}</div>
-      </div>
-    </div>`;
-}
-
-function renderStepLogs() {
-
-  return `
-    <div class="space-y-xs" id="step-logs">
-      ${stepResults.length === 0 ? '<div class="text-on-surface-variant text-sm">Run the demo to see step-by-step execution...</div>' : ''}
-    </div>`;
-}
-
-function addStepLog(step, message, status) {
-  const logs = document.getElementById('step-logs');
-  if (!logs) return;
-
-  const id = `step-${step.toLowerCase().replace(/\s/g, '-')}`;
-  const existing = document.getElementById(id);
-
-  if (existing) {
-    existing.innerHTML = `
-      <div class="flex items-center gap-2">
-        <div class="w-4 h-4 border border-primary rounded-full flex items-center justify-center">
-          <div class="w-2 h-2 bg-primary rounded-full"></div>
+  <span style="color:#908fa0">// Result: N×M RPC calls (slow)</span>
+}</pre>
         </div>
-        <span class="font-label-caps text-label-caps text-primary">${step}</span>
-        <span class="text-on-surface-variant text-sm">${message}</span>
-      </div>`;
-    existing.className = 'p-xs bg-primary/5 border border-primary/20 rounded text-sm';
-  } else {
-    const el = document.createElement('div');
-    el.id = id;
-    el.className = 'p-xs bg-primary/5 border border-primary/20 rounded text-sm';
-    el.innerHTML = `
-      <div class="flex items-center gap-2">
-        <div class="animate-spin w-4 h-4 border border-primary border-t-transparent rounded-full"></div>
-        <span class="font-label-caps text-label-caps text-primary">${step}</span>
-        <span class="text-on-surface-variant text-sm">${message}</span>
-      </div>`;
-    logs.appendChild(el);
-  }
-}
+        <!-- The Solution -->
+        <div class="code-container rounded px-6 py-6 relative group border-[#c0c1ff]/30 shadow-[0_0_15px_rgba(99,102,241,0.1)]">
+          <div class="absolute top-0 left-0 w-full px-6 py-3 border-b border-[#464554]/50 flex justify-between items-center bg-[#2e353f]/20">
+            <span class="text-xs font-semibold text-[#7dd3fc] flex items-center gap-2 tracking-wide"><span class="material-symbols-outlined text-base">check</span> THE SOLUTION</span>
+          </div>
+          <pre class="pt-10 font-[JetBrains_Mono] text-sm overflow-x-auto text-[#c7c4d7]"><span style="color:#908fa0">// M multicalls — results from step 1 flow to step 2</span>
+<span style="color:#c0c1ff">const</span> executor = <span style="color:#494bd6">new</span> Eip1193Executor(provider);
+<span style="color:#c0c1ff">const</span> results = <span style="color:#494bd6">await</span> runMultistepTasks(executor, [
+  defineTask((t) => {
+    <span style="color:#c0c1ff">const</span> balance = t.call({...});
+    <span style="color:#c0c1ff">const</span> assets = t.call({ args: [balance] });
+    <span style="color:#494bd6">return</span> { balance, assets };
+  })
+]);</pre>
+        </div>
+      </div>
+    </section>
+    <!-- Features Grid -->
+    <section class="mb-20">
+      <div class="grid md:grid-cols-3 gap-6">
+        <div class="feature-card rounded p-6 hover:border-[#c0c1ff]/50 transition-colors">
+          <div class="w-10 h-10 rounded bg-[#c0c1ff]/10 flex items-center justify-center mb-4 text-[#c0c1ff]">
+            <span class="material-symbols-outlined">account_tree</span>
+          </div>
+          <h3 class="text-lg font-bold text-white mb-2">FSM executor</h3>
+          <p class="text-[#c7c4d7]">Results from step N flow automatically into step N+1. Build complex read pipelines.</p>
+        </div>
+        <div class="feature-card rounded p-6 hover:border-[#c0c1ff]/50 transition-colors">
+          <div class="w-10 h-10 rounded bg-[#c0c1ff]/10 flex items-center justify-center mb-4 text-[#c0c1ff]">
+            <span class="material-symbols-outlined">hub</span>
+          </div>
+          <h3 class="text-lg font-bold text-white mb-2">Framework agnostic</h3>
+          <p class="text-[#c7c4d7]">Works with viem, ethers, window.ethereum — any EIP-1193 provider.</p>
+        </div>
+        <div class="feature-card rounded p-6 hover:border-[#c0c1ff]/50 transition-colors">
+          <div class="w-10 h-10 rounded bg-[#c0c1ff]/10 flex items-center justify-center mb-4 text-[#c0c1ff]">
+            <span class="material-symbols-outlined">language</span>
+          </div>
+          <h3 class="text-lg font-bold text-white mb-2">Multichain ready</h3>
+          <p class="text-[#c7c4d7]">MultichainResolver runs the same task graph across chains in parallel.</p>
+        </div>
+      </div>
+    </section>
+    <!-- Quick Start -->
+    <section class="mb-20 max-w-3xl mx-auto">
+      <h2 class="text-3xl font-bold text-white mb-4">Quick Start</h2>
+      <div class="code-container rounded px-6 py-6 relative group">
+        <pre class="font-[JetBrains_Mono] text-sm overflow-x-auto text-[#c7c4d7]"><span style="color:#494bd6">import</span> { createPublicClient, http } <span style="color:#494bd6">from</span> <span style="color:#c0c1ff">"viem"</span>
+<span style="color:#494bd6">import</span> { Eip1193Executor, resolveErc4626Vault } <span style="color:#494bd6">from</span> <span style="color:#c0c1ff">"@halaprix/domino"</span>
 
-function updateStepLog(step, message, status) {
-  const id = `step-${step.toLowerCase().replace(/\s/g, '-')}`;
-  const el = document.getElementById(id);
-  if (!el) return;
+<span style="color:#c0c1ff">const</span> provider = createPublicClient({ transport: http() });
+<span style="color:#c0c1ff">const</span> executor = <span style="color:#494bd6">new</span> Eip1193Executor(provider);
 
-  const colorClass = status === 'success' ? 'text-green-500 border-green-500/20 bg-green-500/5' : 'text-error border-error/20 bg-error/5';
-  const icon = status === 'success' ? 'check' : 'close';
-
-  el.className = `p-xs border rounded text-sm ${colorClass}`;
-  el.innerHTML = `
-    <div class="flex items-center gap-2">
-      <span class="material-symbols-outlined text-[16px]">${icon}</span>
-      <span class="font-label-caps text-label-caps">${step}</span>
-      <span class="text-on-surface-variant text-sm">${message}</span>
-    </div>`;
-}
-
-function renderError(message) {
-  const logs = document.getElementById('step-logs');
-  if (logs) {
-    logs.innerHTML += `
-      <div class="p-xs border border-error/20 bg-error/5 rounded text-sm text-error">
-        <span class="material-symbols-outlined text-[16px] mr-1">error</span>
-        ${message}
-      </div>`;
-  }
-}
-
-// Expose to global for onclick handlers
-window.demoFSM = { runDemo };
-
-// Initial render
-render();
-})();
-</script>
-</section>
-<!-- Quick Start -->
-<section class="mb-xl max-w-3xl mx-auto">
-<h2 class="font-headline-md text-headline-md text-white mb-sm">Quick Start</h2>
-<div class="code-container rounded-lg p-sm relative group">
-<button class="absolute top-sm right-sm text-on-surface-variant hover:text-primary transition-colors opacity-0 group-hover:opacity-100 bg-surface-container p-1 rounded border border-outline-variant"><span class="material-symbols-outlined text-[16px]">content_copy</span></button>
-<pre class="font-code-block text-code-block overflow-x-auto text-on-surface-variant"><span class="text-inverse-primary">import</span> { createResolver } <span class="text-inverse-primary">from</span> <span class="text-primary">"@halaprix/domino/viem"</span>;
-
-<span class="text-primary">const</span> resolver = createResolver(client);
-<span class="text-primary">const</span> vault = <span class="text-inverse-primary">await</span> resolver.resolveErc4626({ 
-  vault: <span class="text-primary">"0x..."</span>, 
-  owner: <span class="text-primary">"0x..."</span> 
+<span style="color:#c0c1ff">const</span> vault = <span style="color:#494bd6">await</span> resolveErc4626Vault({
+  executor,
+  vault: <span style="color:#c0c1ff">"0x..."</span>,
+  owner: <span style="color:#c0c1ff">"0x..."</span>,
 });</pre>
-</div>
-</section>
-</main>
-<!-- Footer -->
-<footer class="w-full py-xl px-gutter max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-md bg-surface-container-lowest border-t border-outline-variant mt-auto">
-<div class="font-label-caps text-label-caps text-on-surface-variant">
-            © 2026 domino by halaprix. Licensed under MIT.
-        </div>
-<div class="flex gap-md font-label-caps text-label-caps">
-<a class="text-on-surface-variant hover:text-primary transition-colors" href="https://github.com/halaprix/domino/blob/main/CHANGELOG.md">Changelog</a>
-<a class="text-on-surface-variant hover:text-primary transition-colors" href="https://www.npmjs.com/package/@halaprix/domino">npm</a>
-<a class="text-on-surface-variant hover:text-primary transition-colors" href="https://github.com/halaprix/domino/issues">Issues</a>
-</div>
-</footer>
-</body></html>
+      </div>
+    </section>
+  </main>
+  <!-- Footer -->
+  <footer class="w-full py-10 px-6 max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4 bg-[#080f17] border-t border-[#464554] mt-auto">
+    <div class="text-xs font-semibold text-[#c7c4d7] tracking-wide">© 2026 domino by halaprix. Licensed under MIT.</div>
+    <div class="flex gap-6 text-xs font-semibold">
+      <a class="text-[#c7c4d7] hover:text-[#c0c1ff] transition-colors tracking-wide" href="https://github.com/halaprix/domino/blob/main/CHANGELOG.md">Changelog</a>
+      <a class="text-[#c7c4d7] hover:text-[#c0c1ff] transition-colors tracking-wide" href="https://www.npmjs.com/package/@halaprix/domino">npm</a>
+      <a class="text-[#c7c4d7] hover:text-[#c0c1ff] transition-colors tracking-wide" href="https://github.com/halaprix/domino/issues">Issues</a>
+    </div>
+  </footer>
+</body>
+</html>
