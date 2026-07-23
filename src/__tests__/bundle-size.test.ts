@@ -97,6 +97,40 @@
  * comparisons).
  *
  * Engine subpaths (viem, ethers-v5, ethers-v6) removed in v2.
+ *
+ * 1.3 (F9 `MultichainResolver`): ceiling raised, 15KB → **18KB** gzip.
+ * `MultichainResolver` (`src/engine/multichain.ts`) is a legitimate new
+ * feature class — parallel per-chain fan-out over the existing single-chain
+ * runners, a constructor discriminating/lazily-wrapping `StepExecutor` vs.
+ * `Eip1193Provider` entries, and the [v5] flattened cross-chain duplicate-
+ * instance guard — not bloat to trim. This test measures the WHOLE bundled
+ * artifact, but `"sideEffects": false` (package.json) lets a tree-shaking
+ * consumer's bundler drop `MultichainResolver` entirely if unused, so the
+ * ceiling here is a whole-library budget, not a per-consumer cost — a
+ * consumer who never imports it pays nothing for it. 18KB (not the ~16.7KB
+ * this feature alone needs) deliberately leaves ~1.3KB of headroom for the
+ * remaining 1.3 work (G1's handler migration is expected to be roughly
+ * size-neutral: old handler implementations leave the bundle as new ones
+ * enter). Measured delta:
+ *   before: 56,205 bytes (54.89KB)  gzip 14,282 bytes (13.95KB)
+ *   after:  65,226 bytes (63.70KB)  gzip 17,065 bytes (16.67KB)
+ *   delta:  +9,021 bytes raw (+8.81KB)  +2,783 bytes gzip (+2.72KB)
+ *
+ * 1.3 (F9 external-review round — 2 accepted findings, same 18KB ceiling):
+ * (P1) `snapshot()`'s `getBlockNumber()` calls are now wrapped in
+ * `Promise.resolve().then(...)` — a non-conforming custom executor that
+ * throws SYNCHRONOUSLY (instead of rejecting a promise) used to abort the
+ * `.map()` mid-iteration, discarding an earlier chain's already-created
+ * promise with no handler ever attached to it (a real, reproduced
+ * unhandled-rejection leak, not hypothetical). (P2) the flattened
+ * cross-chain duplicate scan (`assertNoFlattenedDuplicates`) now calls a
+ * shared `isSingleUseTask()` predicate (`src/core/internal.ts`) instead of
+ * re-implementing the brand check inline — `rejectDuplicateInstances`/
+ * `markTasksConsumed` now call the same predicate too, replacing the inline
+ * `Branded<T>`-cast pattern those two used before. Measured delta:
+ *   before: 65,226 bytes (63.70KB)  gzip 17,065 bytes (16.67KB)
+ *   after:  66,345 bytes (64.79KB)  gzip 17,533 bytes (17.12KB)
+ *   delta:  +1,119 bytes raw (+1.09KB)  +468 bytes gzip (+0.46KB)
  */
 
 import { describe, expect, it } from 'vitest'
@@ -116,14 +150,17 @@ function bundleSizeGzip(name: string): number {
 }
 
 describe('bundle size', () => {
-  it('main index bundle is under 15KB gzip (gzip-only budget for consumer experience)', () => {
+  it('main index bundle is under 18KB gzip (gzip-only budget for consumer experience)', () => {
     const sizeGzip = bundleSizeGzip('index.js')
     // Budget switched to gzip-only: what consumers actually download (transfer size).
     // All features included: viem ABI utils + bytecodes + core/handlers +
     // defineTask + hardening + single-use guard + F3 human-readable ABI +
-    // P1 review fixes. Gzip is the metric that matters; descriptive naming
-    // in production code no longer constrained by raw-byte budget.
-    expect(sizeGzip).toBeLessThan(15 * 1024)
+    // P1 review fixes + F9 MultichainResolver. Gzip is the metric that
+    // matters; descriptive naming in production code no longer constrained
+    // by raw-byte budget. Ceiling raised 15KB -> 18KB for F9 — see the
+    // module doc comment's "1.3 (F9 MultichainResolver)" entry for the
+    // measured delta and why 18KB (not just-enough) was chosen.
+    expect(sizeGzip).toBeLessThan(18 * 1024)
   })
 
   it('no engine subpaths exist (removed in v2)', () => {

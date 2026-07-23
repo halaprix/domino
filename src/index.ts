@@ -36,6 +36,10 @@ export type { DominoCallErrorKind, DominoCallErrorOptions } from './core/errors'
 export { Eip1193Executor } from './engine/eip1193'
 export { MulticallResolver, makeResolver } from './engine/resolver'
 export type { ResolverEngine } from './engine/resolver'
+
+// Multichain (F9)
+export { MultichainResolver } from './engine/multichain'
+export type { MultichainRunOptions } from './engine/multichain'
 export {
   MULTICALL3_ADDRESS,
   MULTICALL3_BYTECODE,
