@@ -17,6 +17,20 @@
  * Tasks whose `finalize()` copes with the resulting failures settle as
  * `fulfilled`.
  *
+ * **Adaptive bisection (F6b, `options.adaptiveBatching`):** with it OFF
+ * (default), the paragraph above is the WHOLE story, byte-for-byte unchanged
+ * from F5/1.1 — `executeBatch` catches every ordinary transport rejection
+ * itself and resolves with synthesized failures, so the pool
+ * (`src/core/pool.ts`) never even observes one. With it ON, `executeBatch`
+ * deliberately lets a transport rejection propagate to the pool instead of
+ * catching it, so the pool's bisection can split a `length > 1` batch and
+ * retry both halves. The per-call `DominoCallError` synthesis above still
+ * happens — just once per TERMINAL sub-batch (a single-call rejection, or
+ * the attempts cap exhausted for that original batch) via the
+ * `recordTerminal` policy hook below, instead of once per whole-batch
+ * rejection. Either way, the run never cancels on an ordinary transport
+ * failure: siblings, other steps, and other tasks keep going.
+ *
  * **Dead-task rule (controller ruling — not explicit in the spec text):**
  * if a task's `buildStepCalls()` or `consumeStepResults()` throws, that task
  * is marked dead: no further `buildStepCalls`, `consumeStepResults`, or
@@ -37,7 +51,7 @@
  * `consumeStepResults`/`finalize`) throws".
  */
 
-import type { MultistepTask, StepExecutor, RawResult, Address } from './types'
+import type { MultistepTask, StepExecutor, StepCall, RawResult, Address } from './types'
 import type { BatchOptions } from './runMultistepTasks'
 import { DominoCallError } from './errors'
 import { prepareRun, resolvePinnedBlock } from './internal'
@@ -79,6 +93,30 @@ export type SettledTaskResult<T> =
   | { status: 'rejected'; error: unknown; diagnostics: TaskDiagnostics }
 
 /**
+ * Synthesize one `DominoCallError` (`kind: 'batch'`) per call, all sharing
+ * the SAME `cause` — the transport error that failed the physical batch (or
+ * bisected sub-batch, or coarse terminal group) these calls belong to. Used
+ * from two call sites that must stay provably identical: the non-adaptive
+ * `executeBatch` catch branch (whole-batch failure, T14 shape) and the
+ * adaptive `recordTerminal` policy hook (per-terminal-item failure, F6b) —
+ * factoring this out is what proves they produce the exact same shape.
+ */
+function synthesizeBatchFailures(calls: StepCall[], transportError: unknown): RawResult[] {
+  return calls.map(
+    (call): RawResult => ({
+      status: 'failure',
+      error: new DominoCallError(`Call ${call.key} failed: containing batch rejected`, {
+        kind: 'batch',
+        cause: transportError,
+        target: call.target,
+        functionName: call.functionName,
+        key: call.key,
+      }),
+    }),
+  )
+}
+
+/**
  * Execute multiple MultistepTasks against a single StepExecutor, settling
  * each task independently instead of rejecting the whole call on the first
  * failure.
@@ -93,8 +131,9 @@ export type SettledTaskResult<T> =
  * an invalid `batchSize` makes the returned promise itself reject — it does
  * not produce a settled-but-rejected array. Same for a `StepExecutor` that
  * resolves with the wrong number of results for a batch (an implementation
- * bug in the executor, not a call failure) — see the length-mismatch guard
- * below, which mirrors `run`'s behavior exactly.
+ * bug in the executor, not a call failure) — the length-mismatch guard lives
+ * in the pool itself (`src/core/pool.ts`), applied uniformly to `run` and
+ * `runSettled`, and never retried even when `adaptiveBatching` is on.
  */
 export async function runSettled<TResult>(
   executor: StepExecutor,
@@ -117,7 +156,7 @@ export async function runSettled<TResult>(
   // `runSettled(executor, [], { batchSize: 0 })` rejects rather than
   // silently resolving to `[]` (unchanged 1.0 ordering — contrast with
   // `runMultistepTasks`, which checks the empty-tasks shortcut first).
-  const { batchSize, maxConcurrentBatches } = prepareRun(ts, options)
+  const { batchSize, maxConcurrentBatches, adaptiveBatching, maxBatchAttempts } = prepareRun(ts, options)
 
   if (ts.length === 0) return []
 
@@ -130,7 +169,7 @@ export async function runSettled<TResult>(
   const dead: boolean[] = new Array(ts.length).fill(false)
   const deadError: unknown[] = new Array(ts.length)
 
-  // `runSettled`'s record-and-continue policy (F6a) — see
+  // `runSettled`'s record-and-continue policy (F6a/F6b) — see
   // `src/core/engine.ts`'s doc comment for the full hook contract.
   const policy: StepEnginePolicy = {
     buildStepCalls(taskIndex, step) {
@@ -147,42 +186,47 @@ export async function runSettled<TResult>(
     },
 
     async executeBatch(batch) {
-      let results: RawResult[]
-      try {
-        results = await executor.executeMulticall(batch, options?.block)
-      } catch (transportError) {
-        // Batch-level failure: every call in THIS physical batch fails with
-        // its own DominoCallError, all sharing the SAME cause. Resolve
-        // (never reject) — this is what makes `runSettled` never cancel:
-        // `runBatchPool`'s fail-fast machinery only triggers on a REJECTION
-        // from this hook, and an ordinary transport failure never produces
-        // one here. Later batches/steps still execute.
-        return batch.map(
-          (call): RawResult => ({
-            status: 'failure',
-            error: new DominoCallError(`Call ${call.key} failed: containing batch rejected`, {
-              kind: 'batch',
-              cause: transportError,
-              target: call.target,
-              functionName: call.functionName,
-              key: call.key,
-            }),
-          }),
-        )
+      if (adaptiveBatching) {
+        // F6b: let a transport rejection propagate to the pool so its
+        // bisection can split this batch and retry both halves — the T14
+        // catch-and-resolve-immediately behavior below would otherwise hide
+        // the rejection from the pool entirely, and bisection could never
+        // engage. The per-call `DominoCallError` synthesis still happens —
+        // once per TERMINAL sub-batch, via `recordTerminal` below, instead
+        // of once per whole-batch rejection here. The length-mismatch guard
+        // (a programmer error, never a transport failure) lives in the pool
+        // itself now — see `src/core/pool.ts` — so it applies uniformly to
+        // this call whether the pool handed it a whole batch or a bisected
+        // sub-batch.
+        return executor.executeMulticall(batch, options?.block)
       }
 
-      // Dev-time guard (same as `run`): an executor that resolved but
-      // returned the wrong number of results would silently corrupt
-      // routing. This is an executor-implementation bug, not a call
-      // failure, so it is NOT converted into a batch StepResult — it
-      // rejects this hook, which aborts `runSettled` entirely (via the
-      // pool's ordinary fail-fast path) same as an invalid batchSize.
-      if (results.length !== batch.length) {
-        throw new Error(
-          `StepExecutor returned ${results.length} results for ${batch.length} calls — length mismatch`,
-        )
+      // Adaptive OFF (default) — byte-for-byte T14/F5 behavior: catch a
+      // transport rejection here and RESOLVE with synthesized per-call
+      // failures instead of letting it reach the pool. This is what makes
+      // `runSettled` never cancel by default: `runBatchPool`'s fail-fast
+      // machinery only triggers on a REJECTION from this hook, and an
+      // ordinary transport failure never produces one here. Later
+      // batches/steps still execute. (The length-mismatch guard is likewise
+      // now the pool's job — see `executeBatch` above and `pool.ts` — so
+      // this branch, like the adaptive one, is just the raw executor call.)
+      try {
+        return await executor.executeMulticall(batch, options?.block)
+      } catch (transportError) {
+        return synthesizeBatchFailures(batch, transportError)
       }
-      return results
+    },
+
+    // F6b — adaptive bisection's terminal hook: called once per terminal
+    // sub-batch (a single-call rejection, or the attempts cap exhausted for
+    // its original batch) instead of the whole-batch catch above. Same
+    // synthesis, same shape, proven identical by sharing the one helper.
+    // Never invoked when `adaptiveBatching` is off (no rejection ever
+    // reaches the pool from `executeBatch` above in that case, except the
+    // length-mismatch bug, which bypasses this hook entirely and aborts —
+    // see `pool.ts`).
+    recordTerminal(calls, error) {
+      return synthesizeBatchFailures(calls, error)
     },
 
     consumeStepResults(taskIndex, step, results) {
@@ -199,7 +243,7 @@ export async function runSettled<TResult>(
     },
   }
 
-  await runSteps(ts, { batchSize, maxConcurrentBatches }, policy)
+  await runSteps(ts, { batchSize, maxConcurrentBatches, adaptiveBatching, maxBatchAttempts }, policy)
 
   return ts.map((task, i): SettledTaskResult<TResult> => {
     // Read the task's OWN live diagnostics if it carries the channel (defineTask,
