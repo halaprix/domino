@@ -13,6 +13,10 @@ export type {
 } from './core/types'
 export type { BatchOptions } from './core/runMultistepTasks'
 
+// Per-task settlement (F5)
+export { runSettled } from './core/runSettled'
+export type { TaskDiagnostics, SettledTaskResult } from './core/runSettled'
+
 // Error taxonomy
 export { DominoCallError } from './core/errors'
 export type { DominoCallErrorKind, DominoCallErrorOptions } from './core/errors'
