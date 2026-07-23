@@ -288,11 +288,38 @@ Always present on both branches — never optional, even when empty (`{ optional
 - **Hand-written `MultistepTask`:** rejected iff the task's own `buildStepCalls`/`consumeStepResults`/`finalize` throws (the "dead-task rule" — once one of these three throws for a task, no further hooks run for it, and it settles `{ status: 'rejected', error: <thrown value> }`; sibling tasks are unaffected).
 - **Programmer errors reject the WHOLE call, not one task's settlement:** an invalid `batchSize`, a reused single-use task (`DominoTaskReuseError`), or a `StepExecutor` that resolves with the wrong number of results for a batch all reject the returned promise itself — none of these produce a `{ status: 'rejected' }` array entry.
 
-### Batch-failure isolation (and its pre-1.2 limitation)
+### Batch-failure isolation and adaptive bisection
 
 When `executor.executeMulticall` rejects for a physical batch, `runSettled` does not throw. Every call in that batch becomes a failure carrying its own `DominoCallError` (`kind: 'batch'`) — every one of those errors shares the SAME underlying transport error as `cause`, but each call gets its own `DominoCallError` instance. Execution continues: later batches in the same step, and later steps, still run; tasks whose `finalize()` copes with the resulting failures (or `defineTask` tasks where none of the failed calls are reachable from the returned shape) still settle `fulfilled`.
 
-**Current limitation:** failure isolation operates at physical-batch granularity, not per-call. If one call inside a failed batch would have succeeded on its own (say, only some other call in that batch triggered a malformed response or the RPC timed out), every call in that batch — including the ones that would have succeeded — is reported failed. Adaptive bisection (splitting a failed batch into smaller batches and retrying, to isolate exactly which calls failed) is planned for a future 1.2 release and is not implemented yet.
+Adaptive bisection (`adaptiveBatching: true`, off by default) automatically splits a failed batch in half and retries both halves independently, recursing until every call is isolated to its own single-call execution or `maxBatchAttempts` is exhausted. See the [`adaptiveBatching` field](#batching-options) below for when to enable it and its failure semantics.
+
+## Batching Options
+
+`BatchOptions` — passed as the third parameter to `runMultistepTasks(executor, tasks, options)` — controls step batching, concurrency, adaptive isolation, deduplication, block pinning, and error handling. All fields are optional; defaults are shown below.
+
+| Field | Type | Default | Rationale |
+|---|---|---|---|
+| `batchSize` | `number` | `100` | Multicall3 aggregate3 has per-call gas limits. Split large steps into sequential batches to stay under the limit. Must be positive. |
+| `maxConcurrentBatches` | `number` | `1` | Provider rate limits and executor design typically assume serial execution. Set to >1 only if your provider/executor supports parallelism; `run` fail-fast cancels queued batches, `runSettled` does not. |
+| `adaptiveBatching` | `boolean` | `false` | Bisection cannot distinguish a per-call failure (e.g. out-of-gas) from a transient transport problem (e.g. HTTP 429 rate-limiting); under rate-limiting, retries amplify load by up to 2N−1 calls for a single original batch. Enable only when your transport failures are dominated by bad calls, not rate limits; a future failure-cause classification may allow enabling by default. |
+| `maxBatchAttempts` | `number` | `2·⌈log₂(batchSize)⌉+1` | Bounds bisection recursion. Default is sized for the common single-bad-call case; batches with multiple failing calls may exhaust it before every one is isolated (producing coarser-grained `kind: 'batch'` failures instead, never wrong data). |
+| `dedupe` | `boolean` | `false` | Cross-task call merging changes executor invocation counts seen by instrumentation/billing. Only `TypedCallSpec` calls (from `t.call` in `defineTask`) are ever eligible; legacy tasks are never affected. |
+| `block` | `BlockParam` | `{ blockTag: 'latest' }` | Block to query at (EIP-1898). Every step's `executeMulticall` call uses this parameter; without `pinBlock: true`, stable tags like `'latest'` are re-resolved by the node on each separate `eth_call`, so the chain can advance between steps. |
+| `pinBlock` | `boolean` | `false` | Resolve one concrete block at run start (+1 RPC) and reuse for every step, closing the "chain advanced between steps" gap. Requires `executor.getBlockNumber()`. |
+| `onPin` | `(block: PinnedBlock) => void` | — | Synchronous callback reporting the resolved block (fired exactly once per run when `pinBlock: true`). Only invoked when `pinBlock: true`; supplying it without `pinBlock` is accepted but it is never called. |
+
+See `Presets.throughput` (exports: `{ maxConcurrentBatches: 5, adaptiveBatching: true, dedupe: true }`) for a ready-made bundle suited to portfolio workloads:
+
+```typescript
+import { runMultistepTasks, Presets } from "@halaprix/domino"
+import type { StepExecutor, MultistepTask } from "@halaprix/domino"
+
+declare const executor: StepExecutor
+declare const tasks: MultistepTask<unknown>[]
+
+await runMultistepTasks(executor, tasks, { ...Presets.throughput, batchSize: 200 })
+```
 
 ## Error taxonomy
 
