@@ -6,7 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [1.0.1] — 2026-07-23
 
 ### Added
-- Snippet CI: every TypeScript fence in README/MIGRATION/docs plus `docs/snippets/*.ts` is type-checked in CI against the built dist types (`npm run check:snippets`); bundle-size badge is drift-checked against the measured gzip of `dist/index.js`.
+- Snippet CI: every TypeScript fence in README/MIGRATION/docs plus `docs/snippets/*.ts` is type-checked in CI against the built dist types (`npm run check:snippets`); intentionally non-compiling old-API examples carry an audited `<!-- snippet: skip -->` marker; bundle-size badge is drift-checked against the measured gzip of `dist/index.js`.
 
 ### Fixed
 - README: fictional generator hero replaced with a compiling two-step `MultistepTask` example; nonexistent `name` field removed from documented return shapes; honest batch math (100 vaults + owner @ batchSize 100 = 7 round-trips); viem documented as a hard runtime dependency; bundle badge corrected to measured 7.4KB gzip.
