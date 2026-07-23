@@ -16,6 +16,7 @@
 
 import type { Address, StepExecutor, MultistepTask, BlockParam } from '../core/types'
 import { runMultistepTasks, type BatchOptions } from '../core/runMultistepTasks'
+import { runSettled, type SettledTaskResult } from '../core/runSettled'
 import {
   resolveErc20Token,
   resolveErc20TokensBulk,
@@ -42,6 +43,12 @@ export interface ResolverEngine<TAddr extends string = Address> {
    * the built-in ERC20/ERC4626 conveniences.
    */
   run<T>(tasks: MultistepTask<T>[], options?: BatchOptions): Promise<T[]>
+  /**
+   * Per-task settlement variant of {@link run} — isolates failures per task
+   * instead of rejecting on the first batch/finalize failure. See
+   * `runSettled` (F5) in `../core/runSettled` for full semantics.
+   */
+  runSettled<T>(tasks: MultistepTask<T>[], options?: BatchOptions): Promise<SettledTaskResult<T>[]>
   resolveErc20(params: { token: TAddr; owner?: TAddr; block?: BlockParam }): Promise<Erc20TokenResolution>
   resolveErc20Bulk(params: {
     entries: { token: TAddr; owner?: TAddr }[]
@@ -85,6 +92,10 @@ export class MulticallResolver<TAddr extends string = Address>
 
   run<T>(tasks: MultistepTask<T>[], options?: BatchOptions): Promise<T[]> {
     return runMultistepTasks(this._executor, tasks, options)
+  }
+
+  runSettled<T>(tasks: MultistepTask<T>[], options?: BatchOptions): Promise<SettledTaskResult<T>[]> {
+    return runSettled(this._executor, tasks, options)
   }
 
   resolveErc20(params: { token: TAddr; owner?: TAddr; block?: BlockParam }): Promise<Erc20TokenResolution> {

@@ -3,7 +3,11 @@
  *
  * v2: Single entry point — Eip1193Executor + handlers + bytecodes + viem ABI utils.
  * viem utils tree-shake to ~3KB; bytecodes add ~8KB; core + handlers ~19KB.
- * Target: under 35KB gzipped.
+ * Target: under 36KB raw (unminified `dist/index.js` byte length — the
+ * README's "gzip" badge tracks the compressed size separately, see
+ * `scripts/check-snippets.ts`'s `checkBadge()`).
+ *
+ * 1.1 (F5): `runSettled` adds ~1KB raw — threshold bumped from 35KB to 36KB.
  *
  * Engine subpaths (viem, ethers-v5, ethers-v6) removed in v2.
  */
@@ -19,10 +23,11 @@ function bundleSize(name: string): number {
 }
 
 describe('bundle size', () => {
-  it('main index bundle is under 35KB (core + handlers + viem utils + bytecodes)', () => {
+  it('main index bundle is under 36KB (core + handlers + viem utils + bytecodes)', () => {
     const size = bundleSize('index.js')
-    // v2 bundles viem ABI utils (~3KB) + bytecodes (~8KB) + core/handlers (~19KB)
-    expect(size).toBeLessThan(35 * 1024)
+    // v2 bundles viem ABI utils (~3KB) + bytecodes (~8KB) + core/handlers (~19KB);
+    // 1.1 (F5) adds runSettled (~1KB).
+    expect(size).toBeLessThan(36 * 1024)
   })
 
   it('no engine subpaths exist (removed in v2)', () => {
