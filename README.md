@@ -29,11 +29,74 @@ npm install @halaprix/domino
 
 **Requires `viem` as a runtime dependency** (installed automatically). Works with any EIP-1193 provider — a viem `PublicClient`, `window.ethereum`, or any object exposing `request({ method, params })`. (ethers users need an EIP-1193 adapter.)
 
-## But wait — it's just a state machine
+## Define the dependency, not the state machine
 
-Multicall is great for batched reads. But what about when step 2 needs step 1's results?
+Multicall is great for batched reads. But what about when step 2 needs step 1's result?
 
-Instead of N separate RPC calls per step, domino runs your state machine **as a batch** — one `multicall` per step. You define the steps, it wires them together.
+`defineTask` lets you describe that dependency directly: call something, get back a `Ref` to its result, feed the `Ref` straight into the next call's `args` (or even its `target`). domino works out how many steps that graph needs, executes one multicall per step batch (a step with more calls than `batchSize` splits into several sequential batches), and resolves every `Ref` before handing you back a plain typed object.
+
+```typescript
+import { createPublicClient, http } from "viem"
+import { mainnet } from "viem/chains"
+import { Eip1193Executor, defineTask, runMultistepTasks } from "@halaprix/domino"
+import type { Address } from "@halaprix/domino"
+
+const provider = createPublicClient({ chain: mainnet, transport: http() })
+const executor = new Eip1193Executor(provider)
+
+const vaultAddress = "0x1234567890123456789012345678901234567890" as Address
+const ownerAddress = "0x0987654321098765432109876543210987654321" as Address
+
+// Human-readable ABI — the friendliest way to describe a call.
+const vaultAbi = [
+  "function balanceOf(address) view returns (uint256)",
+  "function convertToAssets(uint256) view returns (uint256)",
+] as const
+
+// A factory: call this fresh for each vault/owner pair — domino tasks are
+// single-run (see "Single-use tasks" below), so `vaultPosition(vault, owner)`
+// returning a new `defineTask(...)` each time is the idiom, not a shared const.
+function vaultPosition(vault: Address, owner: Address) {
+  return defineTask((t) => {
+    // Step 1: read the owner's share balance.
+    const balance = t.call({
+      target: vault,
+      abi: vaultAbi,
+      functionName: "balanceOf",
+      args: [owner],
+    })
+
+    // Step 2: `balance` (a Ref<bigint>) feeds straight into convertToAssets's
+    // args — domino waits for step 1, then builds this call from the result.
+    const assets = t.call({
+      target: vault,
+      abi: vaultAbi,
+      functionName: "convertToAssets",
+      args: [balance],
+    })
+
+    // t.derive computes a value from already-resolved Refs — no extra RPC call.
+    const hasBalance = t.derive([balance], (bal) => bal > 0n)
+
+    return { balance, assets, hasBalance }
+  })
+}
+
+const [result] = await runMultistepTasks(executor, [vaultPosition(vaultAddress, ownerAddress)])
+// result.balance:    balanceOf output from step 1
+// result.assets:      convertToAssets(balance) output from step 2
+// result.hasBalance:  derived locally from balance, no extra RPC call
+```
+
+Same task runs via a resolver too, if you're already holding one: `await resolver.run([vaultPosition(vaultAddress, ownerAddress)])`. For per-task failure isolation instead of one bad task aborting the whole call, swap in `runSettled`/`resolver.runSettled` — see the [API Reference](docs/api-reference.md#runsettled--per-task-settlement).
+
+### Single-use tasks
+
+Every task domino builds (`defineTask`, `buildErc20Task`, `buildErc4626Task`) is **single-run**: submit it to `runMultistepTasks`/`runSettled` once, and a second submission of that same instance throws `DominoTaskReuseError`. That's why the idiom above is a factory function (`vaultPosition(vault, owner)`) rather than a module-level constant — call the factory again to get a fresh instance for the next run.
+
+## What it compiles to — hand-written `MultistepTask`
+
+`defineTask` output *is* a `MultistepTask` — the same `buildStepCalls`/`consumeStepResults`/`finalize` shape you'd write by hand. That hand-written form is still there as an escape hatch, for full control over step gating and result routing that the ref-graph builder can't express (yet):
 
 ```typescript
 import { createPublicClient, http } from "viem"
@@ -105,7 +168,7 @@ const [result] = await runMultistepTasks(executor, [task])
 // result.assets: convertToAssets(balance) output from step 2
 ```
 
-That's the whole API — one `MultistepTask` per entity, batched into one `runMultistepTasks` call. Two pages — read the source of [`erc4626.ts`](src/handlers/erc4626.ts) if you want to see a production example.
+Unlike a `defineTask` output, a hand-written `MultistepTask` like this one is **not** single-use by default — it's plain data, reusable if you keep it stateless. Read the source of [`erc4626.ts`](src/handlers/erc4626.ts) for a production example written this way.
 
 ## Built-in task builders
 
@@ -114,7 +177,7 @@ For convenience, domino ships with pre-built task builders:
 ```typescript
 import { createPublicClient, http } from "viem"
 import { mainnet } from "viem/chains"
-import { Eip1193Executor, resolveErc4626Vault, resolveErc4626VaultsBulk } from "@halaprix/domino"
+import { Eip1193Executor, resolveErc4626Vault, resolveErc4626Bulk } from "@halaprix/domino"
 import type { Address } from "@halaprix/domino"
 
 const provider = createPublicClient({ chain: mainnet, transport: http() })
@@ -125,7 +188,7 @@ const ownerAddress = "0x0987654321098765432109876543210987654321" as Address
 
 // One vault — 2 steps (metadata + convertToAssets)
 const vault = await resolveErc4626Vault({
-  client: executor,
+  executor,
   vault: vaultAddress,
   owner: ownerAddress,
 })
@@ -136,13 +199,15 @@ const vault = await resolveErc4626Vault({
 //   Step 2: 1 call/vault = 100 calls = 1 batch
 //   Total: 7 round-trips
 const vaultAddrs = Array(100).fill("0x1234567890123456789012345678901234567890") as Address[]
-const vaults = await resolveErc4626VaultsBulk({
-  client: executor,
+const vaults = await resolveErc4626Bulk({
+  executor,
   entries: vaultAddrs.map(v => ({ vault: v, owner: ownerAddress })),
 })
 ```
 
-Same pattern for ERC20, and you can `buildErc4626Task()` / `buildErc20Task()` to compose them into custom pipelines.
+Same pattern for ERC20 (`resolveErc20Token` / `resolveErc20Bulk`), and you can `buildErc4626Task()` / `buildErc20Task()` to compose them into custom pipelines — both are single-run factories too, same contract as `defineTask`.
+
+`resolveErc4626Bulk`/`resolveErc20Bulk` are the canonical names (F11). The original `resolveErc4626VaultsBulk`/`resolveErc20TokensBulk` names still work — they're `@deprecated` aliases pointing at the same function (`resolveErc4626VaultsBulk === resolveErc4626Bulk`), kept for the rest of the 1.x line.
 
 ## Historical blocks
 
@@ -161,7 +226,7 @@ const vaultAddress = "0x1234567890123456789012345678901234567890" as Address
 const ownerAddress = "0x0987654321098765432109876543210987654321" as Address
 
 const oldVault = await resolveErc4626Vault({
-  client: executor,
+  executor,
   vault: vaultAddress,
   owner: ownerAddress,
   block: { blockNumber: 19_000_000n },
@@ -180,13 +245,20 @@ Works with `blockHash`, `blockTag`, or `blockNumber`. Even on chains where Multi
 
 | Export | What it is |
 |--------|-----------|
-| `MulticallResolver` | Convenience layer — call `run()` to execute a state machine |
+| `defineTask()` | **Recommended.** Ref-graph task builder — `t.call`/`t.derive`, compiles to a `MultistepTask` |
+| `runSettled()` | Per-task settlement — every task gets its own fulfilled/rejected outcome instead of one failure aborting the whole call |
+| `MulticallResolver` | Convenience layer — call `run()`/`runSettled()` to execute a state machine |
 | `Eip1193Executor` | Single engine — works with any EIP-1193 provider |
 | `runMultistepTasks()` | Core FSM — bare-metal version of the resolver |
+| `DominoCallError` | Structured error for a failed call — `kind` discriminates revert/decode/batch/skipped/derive |
+| `DominoTaskReuseError` | Thrown when a single-run task (`defineTask`/`buildErc20Task`/`buildErc4626Task` output) is submitted twice |
 | `buildErc20Task()` | Build a task definition for ERC20 token reads |
 | `buildErc4626Task()` | Build a task definition for ERC4626 vault reads |
 | `resolveErc20Token()` | One-shot ERC20: `{ symbol, decimals, balance }` |
+| `resolveErc20Bulk()` | Bulk ERC20 (canonical name — `resolveErc20TokensBulk` is a deprecated alias) |
 | `resolveErc4626Vault()` | One-shot ERC4626: `{ metadata: { symbol, decimals, ... }, position: { balance, assets } \| undefined }` |
+| `resolveErc4626Bulk()` | Bulk ERC4626 (canonical name — `resolveErc4626VaultsBulk` is a deprecated alias) |
+| `executor:` | Preferred param name on the four standalone `resolve*` functions (`resolveErc20Token`, `resolveErc20Bulk`, `resolveErc4626Vault`, `resolveErc4626Bulk`) — `client:` still works there but is deprecated. `MulticallResolver` methods don't take it per-call; the executor is passed once, to the constructor. |
 | `BlockParam` | `{ blockNumber } \| { blockTag } \| { blockHash }` (one of three) |
 
 ## Documentation

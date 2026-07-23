@@ -19,7 +19,8 @@
 │  • Finds maxStep across all tasks                   │
 │  • For each step 1..maxStep:                        │
 │    a. buildStepCalls() — collect calls from tasks   │
-│    b. executeMulticall() — one RPC per step         │
+│    b. executeMulticall() — one RPC per step batch   │
+│       (≤ batchSize calls)                           │
 │    c. consumeStepResults() — distribute to tasks    │
 │  • finalize() — assemble results                    │
 └──────────────────────┬──────────────────────────────┘
@@ -36,18 +37,24 @@
 src/
 ├── core/
 │   ├── runMultistepTasks.ts   # FSM executor (framework-agnostic)
+│   ├── runSettled.ts          # Per-task settlement (F5) — batch-failure isolation
+│   ├── defineTask.ts          # Ref-graph task builder (F2) + typed call specs (F1)
+│   ├── refs.ts                # Ref<T>/RefHandle plumbing for defineTask
+│   ├── errors.ts              # DominoCallError taxonomy + DominoTaskReuseError
+│   ├── internal.ts            # Single-use brand + consumption pipeline (shared by both runners)
 │   ├── types.ts               # StepCall, StepResult, BlockParam, Eip1193Provider, etc.
-│   └── abi.ts                 # Re-exports from viem/utils
+│   └── abi.ts                 # Re-exports from viem/utils + parseAbiMemoized (human-readable ABI)
 ├── engine/
 │   ├── eip1193.ts             # Eip1193Executor — deployed + deployless
 │   ├── resolver.ts            # MulticallResolver — typed convenience layer
 │   ├── bytecodes.ts           # Vendored Multicall3 + deployless wrapper bytecodes
 │   └── deployments.ts         # Per-chain Multicall3 deployment block registry
 ├── handlers/
-│   ├── erc20.ts       # buildErc20Task() + resolveErc20Token() / resolveErc20TokensBulk()
-│   └── erc4626.ts     # buildErc4626Task() + resolveErc4626Vault() / resolveErc4626VaultsBulk()
-├── __tests__/         # vitest specs mirroring the source tree
-└── index.ts           # Public API surface
+│   ├── executorParam.ts       # executor:/client: exclusive-union param handling (shared by both handlers)
+│   ├── erc20.ts               # buildErc20Task() + resolveErc20Token() / resolveErc20Bulk()
+│   └── erc4626.ts             # buildErc4626Task() + resolveErc4626Vault() / resolveErc4626Bulk()
+├── __tests__/                 # vitest specs mirroring the source tree
+└── index.ts                   # Public API surface
 ```
 
 ## Usage
@@ -61,17 +68,36 @@ const executor = new Eip1193Executor(provider)
 
 // Current block (default)
 const vault = await resolveErc4626Vault({
-  client: executor,
+  executor,
   vault: "0x...",
   owner: "0x...",
 })
 
 // Historical block
 const oldVault = await resolveErc4626Vault({
-  client: executor,
+  executor,
   vault: "0x...",
   block: { blockNumber: 19_000_000n },
 })
+```
+
+For custom, state-dependent pipelines, prefer `defineTask` over a hand-written `MultistepTask` — it compiles to one (see `src/core/defineTask.ts`):
+
+```typescript
+import { defineTask, runMultistepTasks } from "@halaprix/domino"
+
+const vaultAbi = [
+  "function balanceOf(address) view returns (uint256)",
+  "function convertToAssets(uint256) view returns (uint256)",
+] as const
+
+const task = defineTask((t) => {
+  const balance = t.call({ target: "0x...", abi: vaultAbi, functionName: "balanceOf", args: ["0x..."] })
+  const assets = t.call({ target: "0x...", abi: vaultAbi, functionName: "convertToAssets", args: [balance] })
+  return { balance, assets }
+})
+
+const [result] = await runMultistepTasks(executor, [task])
 ```
 
 ## Development Workflow
@@ -111,3 +137,6 @@ npm run build     # tsup — single ESM/CJS entry
 - **Deployless fallback**: when Multicall3 wasn't deployed at the target block, the executor automatically uses CREATE-style `eth_call` with the vendored wrapper bytecode.
 - **Bytecodes are vendored** from viem's constants — do not edit by hand. Run `scripts/verify-bytecodes.ts` after viem upgrades.
 - **Mixed-depth batches:** tasks with shorter `maxStep` wait for the longest task. This is by design — batching saves RPC round-trips. Split into separate `runMultistepTasks` calls for early results.
+- **`defineTask` compiles to `MultistepTask`**: its output satisfies the exact same `maxStep`/`buildStepCalls`/`consumeStepResults`/`finalize` interface, so it batches with hand-written tasks (and built-in handler tasks) in the same `runMultistepTasks`/`runSettled` call without any special-casing.
+- **Branded tasks are single-run**: `defineTask` output and `buildErc20Task`/`buildErc4626Task` output carry an internal single-use brand (`src/core/internal.ts`) — submitting the same instance to `runMultistepTasks`/`runSettled` twice throws `DominoTaskReuseError`. Hand-written `MultistepTask` objects are never branded and remain reusable if kept stateless (pinned by the 1.0 compat suite) — do not add branding to them.
+- **Executors always receive a parsed `Abi`**: `StepCall.abi` is `Abi` from `abitype`, never a raw string array. `defineTask`'s human-readable ABI form (`readonly string[]`) is normalized via `parseAbiMemoized` at build time — every `StepExecutor` implementation can assume `abi` is already parsed.
