@@ -3,6 +3,26 @@
 All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.0] — 2026-07-23
+
+### Added
+- `defineTask` — ref-graph task builder with `t.call`/`t.derive`, opaque `Ref<T>`s, topo-depth step assignment with step-transparent derives, dynamic `target: Ref<Address>`, optional field demotion with diagnostics, and skip-chain failure propagation; compiles to a plain `MultistepTask` and batches with legacy tasks.
+- Typed call specs — return/args inference from the ABI via viem/abitype; `functionName` constrained to `view`/`pure`; `WithRefs` and `ResolveRefs` utilities.
+- Human-readable ABI — `abi: readonly string[]` accepted by `defineTask`, memoized `parseAbi` (identity + LRU-256 layers, reference-stable results); executors always receive parsed `Abi`.
+- `runSettled` and `MulticallResolver.runSettled` — per-task settlement with always-present `TaskDiagnostics`; batch failures isolate to the failed physical batch (`DominoCallError` kind `batch`) and execution continues.
+- `DominoCallError` taxonomy — kinds `revert`/`decode`/`batch`/`skipped`/`derive` with `data` (raw bytes) and `cause` (original error) as separate fields; failure `StepResult`s now carry the error (1.0 dropped it); empty-`0x` from code-less addresses distinguishable from reverts.
+- `executor:` parameter on standalone resolve functions — `client:` remains a `@deprecated` alias through 1.x; passing both throws.
+- Canonical `resolveErc20Bulk`/`resolveErc4626Bulk` names; `position.maxWithdraw?`/`maxRedeem?` on `Erc4626VaultResolution` (optional in type, populated when the calls succeed); `makeResolver` exported (`@deprecated`).
+- `DominoTaskReuseError` and single-use guard — domino-built task instances (defineTask, buildErc20Task, buildErc4626Task) enforced single-run.
+- 1.0-consumer compatibility suite executed against both src and built dist in CI.
+
+### Changed
+- Domino-built task instances now throw `DominoTaskReuseError` on reuse (reuse was silently unsound in 1.0 due to mutable closure state). Source-compatible otherwise; see MIGRATION.md.
+- Bundle: 7.4KB → 10.9KB gzip (defineTask layer +1.5KB gzip; raw threshold consciously moved per spec).
+
+### Deprecated
+- `client:` param (use `executor:`); `resolveErc20TokensBulk`/`resolveErc4626VaultsBulk` (use canonical names); `metadata.maxWithdraw`/`maxRedeem` (use `position.*`). All remain functional through 1.x.
+
 ## [1.0.1] — 2026-07-23
 
 ### Added
@@ -85,6 +105,7 @@ First public release of `@halaprix/domino`.
 - `position.assets` is `bigint | undefined` — correctly represents the case where `balanceOf` succeeds but `convertToAssets` reverts.
 - CI now runs real `tsc --noEmit` (typecheck); build step runs before tests so `dist/` exists for bundle-size checks on a clean checkout.
 
+[1.1.0]: https://github.com/halaprix/domino/releases/tag/v1.1.0
 [1.0.1]: https://github.com/halaprix/domino/releases/tag/v1.0.1
 [1.0.0]: https://github.com/halaprix/domino/releases/tag/v1.0.0
 [0.1.0]: https://github.com/halaprix/domino/releases/tag/v0.1.0
