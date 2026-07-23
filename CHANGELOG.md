@@ -3,6 +3,17 @@
 All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.0.1] — 2026-07-23
+
+### Added
+- Snippet CI: every TypeScript fence in README/MIGRATION/docs plus `docs/snippets/*.ts` is type-checked in CI against the built dist types (`npm run check:snippets`); bundle-size badge is drift-checked against the measured gzip of `dist/index.js`.
+
+### Fixed
+- README: fictional generator hero replaced with a compiling two-step `MultistepTask` example; nonexistent `name` field removed from documented return shapes; honest batch math (100 vaults + owner @ batchSize 100 = 7 round-trips); viem documented as a hard runtime dependency; bundle badge corrected to measured 7.4KB gzip.
+- `docs/api-reference.md`: regenerated against the real 1.0 API surface — removed `createResolver`, subpath imports, ethers engines, and the dual-engine diagram.
+- `docs/benchmarks.md`: honest RPC round-trip table (default batchSize and batchSize ∞ columns); removed "1 RPC call" claims and stale subpath bundle rows.
+- MIGRATION.md: "After" example now compiles (`mainnet` imported from `viem/chains`).
+
 ## [1.0.0] — 2026-06-06
 
 ### Added
@@ -74,5 +85,6 @@ First public release of `@halaprix/domino`.
 - `position.assets` is `bigint | undefined` — correctly represents the case where `balanceOf` succeeds but `convertToAssets` reverts.
 - CI now runs real `tsc --noEmit` (typecheck); build step runs before tests so `dist/` exists for bundle-size checks on a clean checkout.
 
+[1.0.1]: https://github.com/halaprix/domino/releases/tag/v1.0.1
 [1.0.0]: https://github.com/halaprix/domino/releases/tag/v1.0.0
 [0.1.0]: https://github.com/halaprix/domino/releases/tag/v0.1.0
