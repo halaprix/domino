@@ -9,29 +9,12 @@
  *                    maxRedeem → then convertToAssets(balance))
  */
 
-import type { Address, MultistepTask, StepCall, StepResult, StepExecutor, BlockParam } from '../core/types'
+import type { Address, MultistepTask, StepCall, StepResult, BlockParam } from '../core/types'
 import { runMultistepTasks } from '../core/runMultistepTasks'
 import { SINGLE_USE } from '../core/internal'
 import type { SingleUseCarrier } from '../core/internal'
-
-// Type union for F10: executor/client exclusive union
-type ExecutorParam =
-  | { executor: StepExecutor; /** @deprecated use `executor` */ client?: never }
-  | { /** @deprecated use `executor` */ client: StepExecutor; executor?: never }
-
-// Runtime guard for both/neither
-function resolveExecutor(params: Record<string, unknown>): StepExecutor {
-  if (params['executor'] !== undefined && params['client'] !== undefined) {
-    throw new Error(
-      "Pass either 'executor' or 'client', not both — they are aliases ('client' is deprecated)",
-    )
-  }
-  const executor = (params['executor'] ?? params['client']) as StepExecutor | undefined
-  if (executor === undefined) {
-    throw new Error("Missing 'executor' or 'client' parameter")
-  }
-  return executor
-}
+import type { ExecutorParam } from './executorParam'
+import { resolveExecutor } from './executorParam'
 
 /** Minimal ERC20 ABI — only the functions used by buildErc4626Task. */
 const erc20Abi = [
