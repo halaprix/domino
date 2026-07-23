@@ -2,7 +2,7 @@
 
 ## Bundle Size
 
-`@halaprix/domino` is a lightweight wrapper. The package size (gzip) is **10.9 KB**. The library requires viem as a hard dependency.
+`@halaprix/domino` is a lightweight wrapper. The package size (gzip) is **13.9 KB**. The library requires viem as a hard dependency.
 
 ```typescript
 import { Eip1193Executor, MulticallResolver } from "@halaprix/domino"
@@ -15,7 +15,7 @@ const resolver = new MulticallResolver(executor)
 
 | Package | Size (gzip) | Notes |
 |---|---|---|
-| `@halaprix/domino` | 10.9 KB | viem is a hard dependency; installed with the package, not bundled into dist |
+| `@halaprix/domino` | 13.9 KB | viem is a hard dependency; installed with the package, not bundled into dist |
 
 ## Compared to Alternatives
 
@@ -25,7 +25,7 @@ const resolver = new MulticallResolver(executor)
 | 2-step vault resolution | ✅ | ❌ | ❌ |
 | Cross-entity step batching | ✅ | ❌ | ❌ |
 | Framework-agnostic core | ✅ | ❌ | ❌ |
-| Size (gzip) | 10.9 KB | ~40 KB | 0 (no dep) |
+| Size (gzip) | 13.9 KB | ~40 KB | 0 (no dep) |
 
 ## RPC Round-Trip Counts
 
