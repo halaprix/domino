@@ -17,7 +17,8 @@ Complete reference for `@halaprix/domino`. For a quick introduction see the [REA
 │  • Finds maxStep across all tasks                   │
 │  • For each step 1..maxStep:                        │
 │    a. buildStepCalls() — collect calls from tasks   │
-│    b. executeMulticall() — one RPC per step         │
+│    b. executeMulticall() — one RPC per step batch   │
+│       (≤ batchSize calls)                           │
 │    c. consumeStepResults() — distribute to tasks    │
 │  • finalize() — assemble results                    │
 └──────────────────────┬──────────────────────────────┘
@@ -99,33 +100,55 @@ Or define your own task for custom contracts:
 
 ```typescript
 import { runMultistepTasks } from "@halaprix/domino"
-import type { StepCall, StepResult, MultistepTask, StepExecutor } from "@halaprix/domino"
+import type { StepCall, StepResult, MultistepTask, StepExecutor, Address } from "@halaprix/domino"
 
 declare const executor: StepExecutor
 
 interface MyResult {
-  value: bigint | undefined
+  balance: bigint | undefined
 }
+
+// Minimal ERC20 balanceOf ABI
+const balanceOfAbi = [
+  {
+    type: "function",
+    name: "balanceOf",
+    stateMutability: "view",
+    inputs: [{ name: "account", type: "address" }],
+    outputs: [{ type: "uint256" }],
+  },
+] as const
+
+// Use closure to store context across steps
+const ctx: { balance?: bigint } = {}
 
 const myTask: MultistepTask<MyResult> = {
   maxStep: 1,
+
   buildStepCalls(step) {
     if (step !== 1) return []
     return [
       {
-        key: "result",
-        target: "0x1111111111111111111111111111111111111111" as const,
-        abi: [] as const,
+        key: "balance",
+        target: "0x1111111111111111111111111111111111111111" as Address,
+        abi: balanceOfAbi,
         functionName: "balanceOf",
-        args: ["0x2222222222222222222222222222222222222222" as const],
+        args: ["0x2222222222222222222222222222222222222222" as Address],
       },
     ]
   },
+
   consumeStepResults(step, results) {
-    // Store results for finalize
+    for (const result of results) {
+      if (result.status === "failure") continue
+      if (result.key === "balance" && typeof result.value === "bigint") {
+        ctx.balance = result.value
+      }
+    }
   },
+
   finalize() {
-    return { value: undefined }
+    return { balance: ctx.balance }
   },
 }
 
@@ -185,15 +208,31 @@ interface Erc4626VaultResolution {
 
 Import the following directly from `@halaprix/domino`:
 
-**Values:**
+**Core functions:**
 - `runMultistepTasks<T>(executor: StepExecutor, tasks: MultistepTask<T>[], options?: BatchOptions): Promise<T[]>`
-- `Eip1193Executor` class
-- `MulticallResolver` class
+
+**Eip1193Executor class:**
+- `constructor(provider: Eip1193Provider)`
+- `executeMulticall(calls: StepCall[], block?: BlockParam): Promise<RawResult[]>`
+- `refreshChainId(): Promise<number>`
+
+**MulticallResolver class:**
+- `constructor(executor: StepExecutor)`
+- `get executor(): StepExecutor`
+- `run<T>(tasks: MultistepTask<T>[], options?: BatchOptions): Promise<T[]>`
+- `resolveErc20(params: { token: Address; owner?: Address; block?: BlockParam }): Promise<Erc20TokenResolution>`
+- `resolveErc20Bulk(params: { entries: { token: Address; owner?: Address }[]; batchSize?: number; block?: BlockParam }): Promise<Erc20TokenResolution[]>`
+- `resolveErc4626(params: { vault: Address; owner?: Address; block?: BlockParam }): Promise<Erc4626VaultResolution>`
+- `resolveErc4626Bulk(params: { entries: { vault: Address; owner?: Address }[]; batchSize?: number; block?: BlockParam }): Promise<Erc4626VaultResolution[]>`
+
+**Constants and deployment helpers:**
 - `MULTICALL3_ADDRESS: Address`
 - `MULTICALL3_BYTECODE: string`
 - `DEPLOYLESS_WRAPPER_BYTECODE: string`
-- `MULTICALL3_DEPLOYMENTS: Record<number, { blockCreated: bigint }>` — per-chain Multicall3 deployment info
+- `MULTICALL3_DEPLOYMENTS: Record<number, { blockCreated: bigint }>`
 - `shouldUseDeployless(chainId: number, block?: BlockParam): boolean`
+
+**Handler task builders:**
 - `buildErc20Task(params: { token: Address; owner?: Address }): MultistepTask<Erc20TokenResolution>`
 - `resolveErc20Token(params: { client: StepExecutor; token: Address; owner?: Address; block?: BlockParam }): Promise<Erc20TokenResolution>`
 - `resolveErc20TokensBulk(params: { client: StepExecutor; entries: { token: Address; owner?: Address }[]; batchSize?: number; block?: BlockParam }): Promise<Erc20TokenResolution[]>`

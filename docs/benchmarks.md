@@ -23,7 +23,7 @@ const resolver = new MulticallResolver(executor)
 |---|---|---|---|
 | Sequential steps (FSM) | ✅ | ❌ | ❌ |
 | 2-step vault resolution | ✅ | ❌ | ❌ |
-| Bulk resolution (O(steps)) | ✅ | ❌ | ❌ |
+| Cross-entity step batching | ✅ | ❌ | ❌ |
 | Framework-agnostic core | ✅ | ❌ | ❌ |
 | Size (gzip) | 7.4 KB | ~40 KB | 0 (no dep) |
 
