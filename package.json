@@ -47,6 +47,7 @@
     "typecheck": "tsc --noEmit",
     "benchmark": "tsx scripts/benchmark.ts",
     "benchmark:live": "tsx scripts/benchmark-live.ts",
+    "check:snippets": "tsx scripts/check-snippets.ts",
     "prepublishOnly": "npm run build && npm test"
   },
   "peerDependencies": {},

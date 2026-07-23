@@ -59,12 +59,16 @@ The FSM runs through all tasks step-by-step:
 
 Pick one at import time. The other two engines are eliminated by tree-shaking.
 
+<!-- snippet: skip -->
+
 ```typescript
 import { createResolver } from "@halaprix/domino/viem";
 // or "domino/ethers-v6"
 ```
 
 Returns a `ResolverEngine` with a uniform API regardless of which library you chose. The `ResolverEngine` is designed as a convenience facade that provides the most common DeFi tokens (ERC20/ERC4626) built in, while also providing a generic extension point for executing custom tasks.
+
+<!-- snippet: skip -->
 
 ```typescript
 interface ResolverEngine {
@@ -87,6 +91,8 @@ interface ResolverEngine {
 The core primitive of this library is the `MultistepTask` coupled with the `runMultistepTasks` runner. All built-in resolver methods (like `resolveErc20`) are simply thin wrappers over this primitive. 
 
 If you need to fetch state from custom smart contracts, you don't need to rebuild the engine. Simply construct a custom `MultistepTask` and pass it to the `run<T>()` method:
+
+<!-- snippet: skip -->
 
 ```typescript
 // Custom task definition
