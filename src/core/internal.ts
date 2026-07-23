@@ -69,15 +69,63 @@ const consumed = new WeakSet<object>()
 type Branded<T> = MultistepTask<T> & SingleUseCarrier
 
 /**
- * Pipeline step 1 — the existing `batchSize` validation (message/behavior
- * unchanged from 1.0). A programmer error: failure does NOT consume
- * anything, because nothing has been touched yet.
+ * Numeric options validated + defaulted by `validateOptions` (F6a). All
+ * three ride through `prepareRun`'s return value; `maxBatchAttempts` is
+ * validated and defaulted here but not yet CONSUMED by either runner —
+ * bisection (T15) wires it into the engine without touching this function
+ * again.
  */
-export function validateOptions(batchSize: number | undefined): number {
-  const resolved = batchSize ?? 100
-  if (!Number.isInteger(resolved) || resolved < 1)
-    throw new Error(`batchSize must be a positive integer, got ${resolved}`)
-  return resolved
+export interface ValidatedRunOptions {
+  batchSize: number
+  maxConcurrentBatches: number
+  maxBatchAttempts: number
+}
+
+/** Options `validateOptions` reads — a structural subset of `BatchOptions`. */
+export interface NumericOptionsInput {
+  batchSize?: number
+  maxConcurrentBatches?: number
+  maxBatchAttempts?: number
+}
+
+/**
+ * Shared positive-safe-integer check for all three F6a numeric fields.
+ * `Number.isSafeInteger` (not `Number.isInteger`) — a value like `2**53`
+ * passes `isInteger` but is not exactly representable, so it must still be
+ * rejected; message wording is unchanged across all three fields (mirrors
+ * the original `batchSize`-only message from 1.0/1.1).
+ */
+function validatePositiveSafeInteger(name: string, value: number): void {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`${name} must be a positive integer, got ${value}`)
+  }
+}
+
+/**
+ * Pipeline step 1 — numeric option validation (message/behavior for
+ * `batchSize` alone unchanged from 1.0 in every case any existing test
+ * exercises; F6a extends its check from `Number.isInteger` to
+ * `Number.isSafeInteger` and adds the same check for `maxConcurrentBatches`/
+ * `maxBatchAttempts`). A programmer error: failure does NOT consume
+ * anything, because nothing has been touched yet.
+ *
+ * `maxBatchAttempts`'s default is computed from the RESOLVED `batchSize`
+ * (so a caller-supplied `batchSize` changes the default), per the spec:
+ * `2 * Math.ceil(Math.log2(batchSize)) + 1` — `batchSize: 1` gives
+ * `log2(1) = 0`, `ceil(0) = 0`, default `1`.
+ */
+export function validateOptions(o: NumericOptionsInput | undefined): ValidatedRunOptions {
+  const batchSize = o?.batchSize ?? 100
+  validatePositiveSafeInteger('batchSize', batchSize)
+
+  const maxConcurrentBatches = o?.maxConcurrentBatches ?? 1
+  validatePositiveSafeInteger('maxConcurrentBatches', maxConcurrentBatches)
+
+  const defaultMaxBatchAttempts = 2 * Math.ceil(Math.log2(batchSize)) + 1
+  const maxBatchAttempts = o?.maxBatchAttempts ?? defaultMaxBatchAttempts
+  validatePositiveSafeInteger('maxBatchAttempts', maxBatchAttempts)
+
+  return { batchSize, maxConcurrentBatches, maxBatchAttempts }
 }
 
 /**
@@ -166,19 +214,20 @@ export async function resolvePinnedBlock(): Promise<void> {
 }
 
 /**
- * Shared synchronous prefix of both runners' bodies: validate batchSize →
- * reject duplicate branded instances → pin-capability check → mark branded
- * tasks consumed. Returns the validated `batchSize` so each runner can drop
- * this straight in place of its old inline validation.
+ * Shared synchronous prefix of both runners' bodies: validate numeric
+ * options → reject duplicate branded instances → pin-capability check →
+ * mark branded tasks consumed. Returns the validated options bundle so each
+ * runner can drop this straight in place of its old inline validation.
  *
  * Deliberately stops here (not shared with `resolvePinnedBlock`/the step
  * loop): `run()`/`runSettled()` diverge in failure handling once execution
- * actually starts, so those stay in each runner's own body.
+ * actually starts, so those stay in each runner's own body (see
+ * `src/core/engine.ts`'s `runSteps` for the part that IS now shared).
  */
-export function prepareRun<T>(ts: MultistepTask<T>[], o: { batchSize?: number } | undefined): number {
-  const batchSize = validateOptions(o?.batchSize)
+export function prepareRun<T>(ts: MultistepTask<T>[], o: NumericOptionsInput | undefined): ValidatedRunOptions {
+  const validated = validateOptions(o)
   rejectDuplicateInstances(ts)
   validatePinCapability()
   markTasksConsumed(ts)
-  return batchSize
+  return validated
 }
