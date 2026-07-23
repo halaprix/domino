@@ -306,7 +306,7 @@ Adaptive bisection (`adaptiveBatching: true`, off by default) automatically spli
 | `maxBatchAttempts` | `number` | `2·⌈log₂(batchSize)⌉+1` | Bounds bisection recursion. Default is sized for the common single-bad-call case; batches with multiple failing calls may exhaust it before every one is isolated (producing coarser-grained `kind: 'batch'` failures instead, never wrong data). |
 | `dedupe` | `boolean` | `false` | Cross-task call merging changes executor invocation counts seen by instrumentation/billing. Only `TypedCallSpec` calls (from `t.call` in `defineTask`) are ever eligible; legacy tasks are never affected. |
 | `block` | `BlockParam` | `{ blockTag: 'latest' }` | Block to query at (EIP-1898). Every step's `executeMulticall` call uses this parameter; without `pinBlock: true`, stable tags like `'latest'` are re-resolved by the node on each separate `eth_call`, so the chain can advance between steps. |
-| `pinBlock` | `boolean` | `false` | Resolve one concrete block at run start (+1 RPC) and reuse for every step, closing the "chain advanced between steps" gap. Requires `executor.getBlockNumber()`. |
+| `pinBlock` | `boolean` | `false` | Resolve one concrete block at run start and reuse for every step (adds +1 RPC round-trip only for absent or stable tags like `'latest'`; explicit `blockNumber`/`blockHash` add none). Closing the "chain advanced between steps" gap. Requires `executor.getBlockNumber()`. |
 | `onPin` | `(block: PinnedBlock) => void` | — | Synchronous callback reporting the resolved block (fired exactly once per run when `pinBlock: true`). Only invoked when `pinBlock: true`; supplying it without `pinBlock` is accepted but it is never called. |
 
 See `Presets.throughput` (exports: `{ maxConcurrentBatches: 5, adaptiveBatching: true, dedupe: true }`) for a ready-made bundle suited to portfolio workloads:
@@ -344,35 +344,33 @@ const resolver = new MultichainResolver({
 
 | Method | Signature | Notes |
 |--------|-----------|-------|
-| `chain(chainId)` | `(chainId: number) => StepExecutor \| undefined` | Retrieve the executor for a given chain; returns `undefined` if the chain was not registered in the constructor. |
+| `chain(chainId)` | `(chainId: number) => MulticallResolver` | Retrieve a cached `MulticallResolver` wrapping the given chain's executor. Throws with a descriptive error if the chain was not registered in the constructor, listing every known chain id. |
 | `snapshot()` | `(): Promise<Record<number, bigint>>` | Atomically resolve one block number per registered chain (calls `executor.getBlockNumber()` for each). Returns a map of `chainId → blockNumber`. Used with explicit `blocks` param to pin the same observed block for every task on that chain. |
-| `runAll(plan, options?)` | `(plan: Record<number, MultistepTask<T>[]>, options?: MultichainRunOptions): Promise<Record<number, T[]>>` | Execute tasks per chain in parallel; each chain receives its own merged `blocks` / `onPin` from options. Chain validation: if `plan` contains a chainId lower than 1, throws immediately. If `plan` contains a chainId not registered in the constructor, that chain is rejected (returns falsy result or throws, depending on options). |
-| `runAllSettled(plan, options?)` | `(plan: Record<number, MultistepTask<T>[]>, options?: MultichainRunOptions): Promise<Record<number, SettledTaskResult<T>[]>>` | Per-task settlement per chain — like `runAll` but every task settles independently; one chain's failure never blocks another. |
+| `runAll(plan, options?)` | `(plan: Record<number, MultistepTask<T>[]>, options?: MultichainRunOptions): Promise<Record<number, T[]>>` | Execute tasks per chain in parallel; each chain receives its own effective `block` from the `blocks` map (if present) or the base `block` option. If a plan references a chain id not registered in the constructor, throws before any executor is invoked. On chain failure, rejects with the error from the chain with the lowest id among the failed chains (deterministic). |
+| `runAllSettled(plan, options?)` | `(plan: Record<number, MultistepTask<T>[]>, options?: MultichainRunOptions): Promise<Record<number, SettledTaskResult<T>[]>>` | Per-task settlement per chain — like `runAll` but each chain's tasks settle independently; one chain's failure never blocks another. Validation (unknown chains, flattened duplicates) still runs before any chain starts. |
 
 ### `MultichainRunOptions`
 
-Extends `BatchOptions` with per-chain customization. Unlike the single-chain `BatchOptions.onPin` callback, `MultichainRunOptions` allows per-chain callbacks via a `Record<chainId, callback>`:
+Extends `BatchOptions` with per-chain block overrides:
 
 ```typescript
-import type { BatchOptions, BlockParam, PinnedBlock } from "@halaprix/domino"
+import type { BatchOptions, BlockParam } from "@halaprix/domino"
 
 // MultichainRunOptions extends BatchOptions and adds:
 type MultichainRunOptionsExtension = {
   blocks?: Record<number, BlockParam>
-  onPin?: Record<number, (block: PinnedBlock) => void>
 }
 ```
 
-- `blocks` — optional map of `chainId → BlockParam`. When present, that chain's block is pinned to the supplied param (overriding any `block` field in the base `BatchOptions`); if a chain in `plan` has no entry in this map, falls back to the base `block` option.
-- `onPin` — optional map of `chainId → callback`. Each chain's resolved block (after `pinBlock` or explicit `blocks`) is reported to its corresponding callback, if present, exactly once per chain.
+- `blocks` — optional map of `chainId → BlockParam`. When present, that chain uses the supplied block param instead of the base `options.block`; chains with no entry here fall back to `options.block` as normal. Note: `onPin` (inherited from `BatchOptions`) is the single-chain callback; each chain reports to it once per run, but it receives no chain id attribution.
 
 ### Flattened duplicate-instance validation
 
 Before ANY chain executes, `runAll`/`runAllSettled` validates that single-use tasks (`defineTask`, `buildErc20Task`, `buildErc4626Task` output) are not duplicated across the entire `plan` (not just per-chain). A reused instance is detected and throws `DominoTaskReuseError` before the first executor is invoked. Build fresh tasks for each entry, or share tasks only if they are hand-written `MultistepTask` objects (which are stateless and reusable).
 
-### Lowest-chainId rejection rule
+### Chain failure determinism
 
-If `plan` keys contain a `chainId < 1`, `runAll`/`runAllSettled` throws immediately with a descriptive error. This guards against accidental usage of the 0 or negative identifiers, which are either reserved (chainId 0 has no meaning in EVM) or invalid.
+If multiple chains reject during `runAll`, the rejection from the chain with the LOWEST id among those that failed is thrown (deterministic tie-breaking). This mirrors the concurrency pool's own determinism rule in single-chain `run()`. `runAllSettled` never rejects on task/call failures (those are isolated per chain); it only rejects on programmer errors like unknown plan chain ids.
 
 ### Single-T generic
 
@@ -569,7 +567,7 @@ See [Benchmarks](benchmarks.md) for live timing data and provider recommendation
 
 ### Block pinning and cross-step consistency
 
-`pinBlock: true` adds +1 RPC round-trip at run start to resolve a concrete block number, then reuses it for every step and physical batch within that run. This costs time but guarantees that all reads see the same EVM state, even if the chain advances between steps. For single-step tasks or when eventual consistency is acceptable, omit `pinBlock` (default `false`).
+`pinBlock: true` resolves one concrete block at run start and reuses it for every step and physical batch. When the `block` option is absent or carries a stable tag (e.g. `'latest'`), this adds +1 RPC round-trip; when an explicit `blockNumber` or `blockHash` is provided, no extra RPC is incurred (the value is used as-is). Pinning guarantees all reads see the same EVM state, even if the chain advances between steps. For single-step tasks or when eventual consistency is acceptable, omit `pinBlock` (default `false`).
 
 `MultichainResolver.snapshot()` similarly pins one block per chain, but returns the block map explicitly so the caller can reuse it across multiple `runAll` calls without re-resolving. Use this when a cross-chain comparison needs the same block observed once, then held stable for follow-up queries.
 

@@ -242,8 +242,8 @@ Execute the same task graph across multiple chains in parallel, with atomic bloc
 ```typescript
 import { createPublicClient, http } from "viem"
 import { mainnet, base } from "viem/chains"
-import { Eip1193Executor, MultichainResolver } from "@halaprix/domino"
-import type { MultistepTask } from "@halaprix/domino"
+import { Eip1193Executor, MultichainResolver, defineTask } from "@halaprix/domino"
+import type { Address } from "@halaprix/domino"
 
 const resolver = new MultichainResolver({
   [mainnet.id]: new Eip1193Executor(createPublicClient({ chain: mainnet, transport: http() })),
@@ -253,17 +253,28 @@ const resolver = new MultichainResolver({
 // Snapshot block numbers per chain for atomicity
 const blocks = await resolver.snapshot()
 
-declare const task1: MultistepTask<unknown>
-declare const task2: MultistepTask<unknown>
+declare const vaultAddress: Address
+declare const ownerAddress: Address
+
+// Task factory — create a fresh task per chain (tasks are single-run)
+const makeTask = () =>
+  defineTask((t) => ({
+    balance: t.call({
+      target: vaultAddress,
+      abi: [{ type: 'function', name: 'balanceOf', stateMutability: 'view', inputs: [{ type: 'address' }], outputs: [{ type: 'uint256' }] }],
+      functionName: 'balanceOf',
+      args: [ownerAddress],
+    }),
+  }))
 
 // Run the same task graph on each chain with pinned blocks
 const results = await resolver.runAll({
-  [mainnet.id]: [task1, task2],
-  [base.id]: [task1, task2],
-}, { 
+  [mainnet.id]: [makeTask()],
+  [base.id]: [makeTask()],
+}, {
   blocks: Object.fromEntries(
     Object.entries(blocks).map(([cid, num]) => [cid, { blockNumber: num }])
-  )
+  ),
 })
 // results is { [mainnet.id]: [...], [base.id]: [...] }
 ```

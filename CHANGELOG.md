@@ -6,8 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [1.3.0] — 2026-07-23
 
 ### Added
-- `MultichainResolver` — parallel per-chain execution with `chain()` builder, `snapshot()` for atomicity, `runAll`/`runAllSettled` entry points, per-chain `blocks` pinning, per-chain `onPin` callback, and flattened duplicate-instance validation before any chain executes. Lowest-chainId rejection rule for invalid chain identifiers. Single-T generic over result shape per call (mixed shapes require separate invocations).
-- `MultichainRunOptions` — batch options wrapper with per-chain customization (`blocks`, `onPin`).
+- `MultichainResolver` — parallel per-chain execution with `chain()` builder, `snapshot()` for atomicity, `runAll`/`runAllSettled` entry points, per-chain `blocks` overrides, and flattened duplicate-instance validation before any chain executes. On failure across multiple chains, the error from the lowest-chainId is thrown (deterministic). Single-T generic over result shape per call (mixed shapes require separate invocations).
+- `MultichainRunOptions` — batch options wrapper with per-chain customization via `blocks` map (e.g. `{ blocks: { 1: { blockNumber }, 8453: { blockNumber } } }`).
 - `examples/refinance.ts` — Aave v3 + Spark + Morpho Blue dynamic-target refinance comparison across Ethereum mainnet and Base (optional via `RPC_URL_8453`); demonstrates `defineTask`, `Presets.throughput`, `MultichainResolver`, and per-chain block pinning. Type-checked in CI against the built dist.
 
 ### Changed
