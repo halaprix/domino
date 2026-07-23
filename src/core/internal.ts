@@ -33,9 +33,12 @@
  *
  * **Naming:** below this point, local/parameter names are deliberately
  * terse (`t`/`ts`/`o` for task/tasks/options) — a legacy artifact of a
- * retired raw-byte bundle budget. This module is 100% internal (never
- * imported outside `defineTask.ts`/`erc20.ts`/`erc4626.ts`/the two runners),
- * so future code should prefer descriptive names.
+ * retired raw-byte bundle budget. This module is 100% internal (imported
+ * only by `defineTask.ts`/`erc20.ts`/`erc4626.ts`/the two runners, plus
+ * `engine/multichain.ts` (F9) for the `SINGLE_USE` brand alone — its
+ * flattened, cross-chain duplicate check mirrors `rejectDuplicateInstances`
+ * below rather than calling it, since it scans a whole plan of per-chain
+ * arrays instead of one), so future code should prefer descriptive names.
  */
 
 import type { MultistepTask, StepExecutor, BlockParam, PinnedBlock } from './types'
