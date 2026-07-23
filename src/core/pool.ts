@@ -53,14 +53,33 @@
  * item, not this one — this one was never executed at all). Otherwise
  * `attempts[i]++` then execute.
  *
- * Because the cap is checked at claim time rather than at split-decision
- * time, a rejection always unconditionally pushes both halves when
- * `adaptive && calls.length > 1` — the cap decides, independently and per
- * child, whether each one actually gets to run. This is what produces the
- * spec's "coarse group" behavior for free when the cap runs out mid-tree:
- * whichever children can't get a claim-time attempt slot become terminal
- * together, with no special-casing for "the cap ran out partway through a
- * split".
+ * A rejection ALSO re-checks the cap itself, synchronously, before deciding
+ * to split (external review, P1): if `attempts[i]` has already reached
+ * `maxBatchAttempts` — i.e. this execution WAS the original's last allowed
+ * one — the item terminalizes immediately, right here, instead of pushing
+ * children that would merely be exhausted later, AT CLAIM TIME, by the check
+ * above. This is not just an optimization: those children only reach the
+ * claim-time check if a worker actually claims them, and once `cancelled` is
+ * true (a *sibling* original's own terminal, discovered concurrently, always
+ * wins the race unconditionally — no worker claims anything further once it
+ * flips), a queued item is — correctly, per (a) below — never claimed at
+ * all. Deferring a KNOWN exhaustion to "push children and hope they get
+ * claimed" would silently drop this item's own terminal error from
+ * `terminalErrors` whenever cancellation from elsewhere wins that race,
+ * corrupting both `cause = last transport error` and the lowest-
+ * `(batchIndex, callIndex)` selection in (c) below. Catching the exhausted
+ * case synchronously, in the same tick as the rejection that caused it,
+ * guarantees this item's own terminal is recorded regardless of what any
+ * other in-flight item does.
+ *
+ * When attempts DO remain, a rejection unconditionally pushes both halves —
+ * each child's own fate (execute, or find itself exhausted) is then decided
+ * independently at ITS OWN claim time, per the paragraph above. This is what
+ * produces the spec's "coarse group" behavior for free when the cap runs
+ * out mid-tree AFTER this point: whichever children can't get a claim-time
+ * attempt slot become terminal together, using the same `lastError[i]`, with
+ * no special-casing needed beyond the exhausted-at-rejection-time check just
+ * described.
  *
  * ## Terminal policy hook (F6b)
  *
@@ -317,7 +336,19 @@ export async function runBatchPool(
       } catch (error) {
         lastError[origBatchIndex] = error
 
-        if (adaptive && calls.length > 1) {
+        // External review (P1): re-check the cap HERE, synchronously, before
+        // deciding to split — not just at each child's own future claim
+        // time. If this execution already consumed the original's last
+        // allowed attempt, pushing children would make this item's terminal
+        // depend on a worker actually claiming them later — which never
+        // happens once a *sibling* original's cancellation has already won
+        // the race (see the module doc's "Attempts accounting" section).
+        // Terminalizing THIS item immediately, covering its own full call
+        // range, guarantees its error is recorded regardless of what any
+        // concurrently in-flight item does.
+        const attemptsRemain = attempts[origBatchIndex]! < maxBatchAttempts
+
+        if (adaptive && calls.length > 1 && attemptsRemain) {
           // Bisection: split and retry both halves through this SAME
           // central queue — no recursive await. See the module doc's "The
           // queue" section for why this can never deadlock.

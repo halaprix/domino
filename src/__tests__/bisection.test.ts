@@ -468,3 +468,91 @@ describe('length-mismatch is never retried, even under adaptive', () => {
     expect(callCount).toBe(1)
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────
+// External review (P1): a rejection that consumes an original batch's LAST
+// attempt must terminalize immediately, not push children whose fate then
+// depends on being claimed — because once a SIBLING original's cancellation
+// wins the race, those children are never claimed, and this item's own
+// terminal error would silently never enter `terminalErrors` at all.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe('concurrent cancellation does not drop an in-flight exhaustion terminal (P1)', () => {
+  it('original B (lower batch index) exhausts while in flight, after original A (higher index) has already cancelled -> B\'s last error wins the (batchIndex, callIndex) ordering', async () => {
+    // Task order [B, A] with batchSize=4 makes B's 4 calls exactly original
+    // batch 0 and A's 1 call exactly original batch 1 — deterministic index
+    // assignment, no reliance on timing for WHICH original gets which index.
+    const bTask: MultistepTask<null> = {
+      maxStep: 1,
+      buildStepCalls(step) {
+        return step === 1 ? Array.from({ length: 4 }, (_, i) => call('b' + i)) : []
+      },
+      consumeStepResults() {},
+      finalize() {
+        return null
+      },
+    }
+    const aTask: MultistepTask<null> = {
+      maxStep: 1,
+      buildStepCalls(step) {
+        return step === 1 ? [call('a0')] : []
+      },
+      consumeStepResults() {},
+      finalize() {
+        return null
+      },
+    }
+
+    const bFinalError = new Error('B-fail-final')
+    const aError = new Error('A-fail')
+
+    const executor: StepExecutor = {
+      async executeMulticall(calls: StepCall[]): Promise<RawResult[]> {
+        const keys = calls.map((c) => c.key)
+        if (keys[0]!.startsWith('a')) {
+          // A: single call, fast and deterministic — exhausts (terminalizes
+          // immediately, since length===1) and cancels the whole pool well
+          // before B's final attempt below ever settles.
+          await sleep(10)
+          throw aError
+        }
+        // B: 4 calls, maxBatchAttempts=2.
+        if (calls.length > 2) {
+          // Attempt 1 (whole batch) — reject fast so it splits immediately,
+          // long before A's cancellation.
+          await sleep(1)
+          throw new Error('B-fail-whole')
+        }
+        // Attempt 2 (one of the two length-2 children) — THIS is B's last
+        // allowed attempt (maxBatchAttempts: 2). Deliberately slow: still
+        // in flight when A's cancellation (at ~10ms) fires, so this
+        // rejection is discovered strictly AFTER `cancelled` is already
+        // true — exactly the race the P1 fix closes.
+        await sleep(50)
+        throw bFinalError
+      },
+    }
+
+    let thrown: unknown
+    let rejected = false
+    try {
+      await runMultistepTasks(executor, [bTask, aTask], {
+        batchSize: 4,
+        maxConcurrentBatches: 2,
+        adaptiveBatching: true,
+        maxBatchAttempts: 2,
+      })
+    } catch (err) {
+      rejected = true
+      thrown = err
+    }
+
+    expect(rejected).toBe(true)
+    // B is original batch index 0, A is index 1 — (batchIndex, callIndex)
+    // ordering deterministically selects B's error, REGARDLESS of A having
+    // cancelled the pool first. Before the P1 fix, B's in-flight final
+    // rejection was silently dropped (its children were pushed but never
+    // claimed post-cancellation) and `aError` was thrown instead.
+    expect(thrown).toBe(bFinalError)
+  })
+})
