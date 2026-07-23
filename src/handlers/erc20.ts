@@ -13,6 +13,25 @@ import { runMultistepTasks } from '../core/runMultistepTasks'
 import { SINGLE_USE } from '../core/internal'
 import type { SingleUseCarrier } from '../core/internal'
 
+// Type union for F10: executor/client exclusive union
+type ExecutorParam =
+  | { executor: StepExecutor; /** @deprecated use `executor` */ client?: never }
+  | { /** @deprecated use `executor` */ client: StepExecutor; executor?: never }
+
+// Runtime guard for both/neither
+function resolveExecutor(params: Record<string, unknown>): StepExecutor {
+  if (params['executor'] !== undefined && params['client'] !== undefined) {
+    throw new Error(
+      "Pass either 'executor' or 'client', not both — they are aliases ('client' is deprecated)",
+    )
+  }
+  const executor = (params['executor'] ?? params['client']) as StepExecutor | undefined
+  if (executor === undefined) {
+    throw new Error("Missing 'executor' or 'client' parameter")
+  }
+  return executor
+}
+
 /** Minimal ERC20 ABI — only the functions used by buildErc20Task. */
 const erc20Abi = [
   {
@@ -137,13 +156,14 @@ export function buildErc20Task(params: {
 // Convenience resolvers that compose buildErc20Task with runMultistepTasks.
 // Use from engine entry points or when a StepExecutor is already available.
 
-export async function resolveErc20Token(params: {
-  client: StepExecutor
-  token: Address
-  owner?: Address
-  block?: BlockParam
-}): Promise<Erc20TokenResolution> {
-  const executor = params.client
+export async function resolveErc20Token(
+  params: ExecutorParam & {
+    token: Address
+    owner?: Address
+    block?: BlockParam
+  },
+): Promise<Erc20TokenResolution> {
+  const executor = resolveExecutor(params)
   const taskParams: { token: Address; owner?: Address } = { token: params.token }
   if (params.owner !== undefined) taskParams.owner = params.owner
   const [result] = await runMultistepTasks(executor, [buildErc20Task(taskParams)], {
@@ -152,14 +172,19 @@ export async function resolveErc20Token(params: {
   return result!
 }
 
-export async function resolveErc20TokensBulk(params: {
-  client: StepExecutor
-  entries: { token: Address; owner?: Address }[]
-  batchSize?: number
-  block?: BlockParam
-}): Promise<Erc20TokenResolution[]> {
+/**
+ * Canonical name for bulk ERC20 token resolution (F11).
+ * Accepts both `executor:` (preferred) and `client:` (deprecated, F10) parameters.
+ */
+export async function resolveErc20Bulk(
+  params: ExecutorParam & {
+    entries: { token: Address; owner?: Address }[]
+    batchSize?: number
+    block?: BlockParam
+  },
+): Promise<Erc20TokenResolution[]> {
   if (params.entries.length === 0) return []
-  const executor = params.client
+  const executor = resolveExecutor(params)
   const tasks = params.entries.map((e) => {
     return e.owner !== undefined
       ? buildErc20Task({ token: e.token, owner: e.owner as Address })
@@ -174,3 +199,8 @@ export async function resolveErc20TokensBulk(params: {
     },
   )
 }
+
+/**
+ * @deprecated Use `resolveErc20Bulk` instead. Forever-in-1.x alias (F11).
+ */
+export const resolveErc20TokensBulk = resolveErc20Bulk

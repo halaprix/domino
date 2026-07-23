@@ -14,6 +14,25 @@ import { runMultistepTasks } from '../core/runMultistepTasks'
 import { SINGLE_USE } from '../core/internal'
 import type { SingleUseCarrier } from '../core/internal'
 
+// Type union for F10: executor/client exclusive union
+type ExecutorParam =
+  | { executor: StepExecutor; /** @deprecated use `executor` */ client?: never }
+  | { /** @deprecated use `executor` */ client: StepExecutor; executor?: never }
+
+// Runtime guard for both/neither
+function resolveExecutor(params: Record<string, unknown>): StepExecutor {
+  if (params['executor'] !== undefined && params['client'] !== undefined) {
+    throw new Error(
+      "Pass either 'executor' or 'client', not both — they are aliases ('client' is deprecated)",
+    )
+  }
+  const executor = (params['executor'] ?? params['client']) as StepExecutor | undefined
+  if (executor === undefined) {
+    throw new Error("Missing 'executor' or 'client' parameter")
+  }
+  return executor
+}
+
 /** Minimal ERC20 ABI — only the functions used by buildErc4626Task. */
 const erc20Abi = [
   {
@@ -78,10 +97,21 @@ export interface Erc4626VaultResolution {
     symbol: string | undefined
     decimals: number | undefined
     underlyingAsset: Address | undefined
+    /** @deprecated Use `position.maxWithdraw` instead (F11 — same value) */
     maxWithdraw: bigint | undefined
+    /** @deprecated Use `position.maxRedeem` instead (F11 — same value) */
     maxRedeem: bigint | undefined
   }
-  position: { balance: bigint; assets: bigint | undefined } | undefined
+  position:
+    | {
+        balance: bigint
+        assets: bigint | undefined
+        /** Optional, populated when maxWithdraw call succeeds (F11) */
+        maxWithdraw?: bigint
+        /** Optional, populated when maxRedeem call succeeds (F11) */
+        maxRedeem?: bigint
+      }
+    | undefined
 }
 
 type Erc4626Context = {
@@ -222,7 +252,13 @@ export function buildErc4626Task(params: {
         },
         position:
           hasOwner && ctx.balance !== undefined
-            ? { balance: ctx.balance, assets: ctx.assets }
+            ? {
+                balance: ctx.balance,
+                assets: ctx.assets,
+                // exactOptionalPropertyTypes: conditional spread only when defined
+                ...(ctx.maxWithdraw !== undefined ? { maxWithdraw: ctx.maxWithdraw } : {}),
+                ...(ctx.maxRedeem !== undefined ? { maxRedeem: ctx.maxRedeem } : {}),
+              }
             : undefined,
       }
     },
@@ -235,13 +271,14 @@ export function buildErc4626Task(params: {
 // Convenience resolvers that compose buildErc4626Task with runMultistepTasks.
 // Use from engine entry points or when a StepExecutor is already available.
 
-export async function resolveErc4626Vault(params: {
-  client: StepExecutor
-  vault: Address
-  owner?: Address
-  block?: BlockParam
-}): Promise<Erc4626VaultResolution> {
-  const executor = params.client
+export async function resolveErc4626Vault(
+  params: ExecutorParam & {
+    vault: Address
+    owner?: Address
+    block?: BlockParam
+  },
+): Promise<Erc4626VaultResolution> {
+  const executor = resolveExecutor(params)
   const taskParams: { vault: Address; owner?: Address } = { vault: params.vault }
   if (params.owner !== undefined) taskParams.owner = params.owner
   const [result] = await runMultistepTasks(executor, [buildErc4626Task(taskParams)], {
@@ -250,14 +287,19 @@ export async function resolveErc4626Vault(params: {
   return result!
 }
 
-export async function resolveErc4626VaultsBulk(params: {
-  client: StepExecutor
-  entries: { vault: Address; owner?: Address }[]
-  batchSize?: number
-  block?: BlockParam
-}): Promise<Erc4626VaultResolution[]> {
+/**
+ * Canonical name for bulk ERC4626 vault resolution (F11).
+ * Accepts both `executor:` (preferred) and `client:` (deprecated, F10) parameters.
+ */
+export async function resolveErc4626Bulk(
+  params: ExecutorParam & {
+    entries: { vault: Address; owner?: Address }[]
+    batchSize?: number
+    block?: BlockParam
+  },
+): Promise<Erc4626VaultResolution[]> {
   if (params.entries.length === 0) return []
-  const executor = params.client
+  const executor = resolveExecutor(params)
   const tasks = params.entries.map((e) => {
     return e.owner !== undefined
       ? buildErc4626Task({ vault: e.vault, owner: e.owner as Address })
@@ -269,3 +311,8 @@ export async function resolveErc4626VaultsBulk(params: {
     { ...(params.batchSize !== undefined ? { batchSize: params.batchSize } : {}), ...(params.block !== undefined ? { block: params.block } : {}) },
   )
 }
+
+/**
+ * @deprecated Use `resolveErc4626Bulk` instead. Forever-in-1.x alias (F11).
+ */
+export const resolveErc4626VaultsBulk = resolveErc4626Bulk
