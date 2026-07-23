@@ -13,6 +13,10 @@ export type {
 } from './core/types'
 export type { BatchOptions } from './core/runMultistepTasks'
 
+// Error taxonomy
+export { DominoCallError } from './core/errors'
+export type { DominoCallErrorKind, DominoCallErrorOptions } from './core/errors'
+
 // Engine
 export { Eip1193Executor } from './engine/eip1193'
 export { MulticallResolver } from './engine/resolver'

@@ -417,4 +417,67 @@ describe('runMultistepTasks', () => {
     expect(results).toHaveLength(3)
     expect(results[0]).toEqual({ symbol: 'TOK', decimals: 6, balance: undefined })
   })
+
+  it('forwards the SAME error object from a failing RawResult to consumeStepResults (line-122 fix)', async () => {
+    const boom = new Error('call reverted')
+
+    const mockExecutor: StepExecutor = {
+      async executeMulticall(_calls: StepCall[]): Promise<any[]> {
+        return [{ status: 'failure', error: boom }]
+      },
+    }
+
+    let received: StepResult[] = []
+
+    const task: MultistepTask<Record<string, never>> = {
+      maxStep: 1,
+      buildStepCalls(step) {
+        if (step !== 1) return []
+        return [{ key: 'a', target: '0xA0b86991c6218b36c1d19D4a2e9Eb004C35d5Cc4', abi: [], functionName: 'symbol' }]
+      },
+      consumeStepResults(_step, results) {
+        received = results
+      },
+      finalize() {
+        return {}
+      },
+    }
+
+    await runMultistepTasks(mockExecutor, [task])
+
+    expect(received).toHaveLength(1)
+    expect(received[0]).toEqual({ status: 'failure', key: 'a', error: boom })
+    // Must be the SAME error object — no wrapping.
+    expect((received[0] as { status: 'failure'; error?: unknown }).error).toBe(boom)
+  })
+
+  it('omits the error key from a failure StepResult when the RawResult had no error (exactOptionalPropertyTypes)', async () => {
+    const mockExecutor: StepExecutor = {
+      async executeMulticall(_calls: StepCall[]): Promise<any[]> {
+        return [{ status: 'failure' }]
+      },
+    }
+
+    let received: StepResult[] = []
+
+    const task: MultistepTask<Record<string, never>> = {
+      maxStep: 1,
+      buildStepCalls(step) {
+        if (step !== 1) return []
+        return [{ key: 'a', target: '0xA0b86991c6218b36c1d19D4a2e9Eb004C35d5Cc4', abi: [], functionName: 'symbol' }]
+      },
+      consumeStepResults(_step, results) {
+        received = results
+      },
+      finalize() {
+        return {}
+      },
+    }
+
+    await runMultistepTasks(mockExecutor, [task])
+
+    expect(received).toHaveLength(1)
+    expect(received[0]).toEqual({ status: 'failure', key: 'a' })
+    expect('error' in received[0]!).toBe(false)
+  })
 })
