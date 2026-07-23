@@ -25,7 +25,7 @@ export type { TaskBuilder, TypedCallSpec } from './core/defineTask'
 export type { Ref, WithRefs, ResolveRefs } from './core/refs'
 
 // Error taxonomy
-export { DominoCallError } from './core/errors'
+export { DominoCallError, DominoTaskReuseError } from './core/errors'
 export type { DominoCallErrorKind, DominoCallErrorOptions } from './core/errors'
 
 // Engine

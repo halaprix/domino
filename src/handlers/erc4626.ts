@@ -11,6 +11,8 @@
 
 import type { Address, MultistepTask, StepCall, StepResult, StepExecutor, BlockParam } from '../core/types'
 import { runMultistepTasks } from '../core/runMultistepTasks'
+import { SINGLE_USE } from '../core/internal'
+import type { SingleUseCarrier } from '../core/internal'
 
 /** Minimal ERC20 ABI — only the functions used by buildErc4626Task. */
 const erc20Abi = [
@@ -224,7 +226,9 @@ export function buildErc4626Task(params: {
             : undefined,
       }
     },
-  }
+
+    [SINGLE_USE]: true,
+  } as MultistepTask<Erc4626VaultResolution> & SingleUseCarrier
 }
 
 // ─── Application layer ────────────────────────────────────────────────────────

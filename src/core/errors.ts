@@ -84,3 +84,26 @@ export class DominoCallError extends Error {
     if (opts.key !== undefined) this.key = opts.key
   }
 }
+
+/**
+ * Thrown by `runMultistepTasks`/`run`/`runSettled` when a single-use-branded
+ * task is submitted more than once — either the same instance reused across
+ * two separate calls, or the same instance appearing twice in one `tasks`
+ * array (F2's consumption pipeline, see `src/core/internal.ts`).
+ *
+ * This is a programmer error (misuse of the task-reuse contract), not an
+ * on-chain call failure, so it deliberately extends `Error` directly — NOT
+ * `DominoCallError`, whose taxonomy is reserved for failures resolved through
+ * the FSM executor (reverts, decode failures, batch/transport errors).
+ *
+ * Only tasks carrying the internal single-use brand are guarded (`defineTask`
+ * output, `buildErc20Task`/`buildErc4626Task` output). User-authored legacy
+ * `MultistepTask` objects are never branded and therefore never throw this —
+ * see the compat pin in `src/__tests__/compat/legacy-tasks-1.0.test.ts`.
+ */
+export class DominoTaskReuseError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'DominoTaskReuseError'
+  }
+}

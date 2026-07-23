@@ -14,6 +14,7 @@
  */
 
 import type { MultistepTask, StepCall, StepResult, StepExecutor, RawResult, BlockParam } from './types'
+import { prepareRun, resolvePinnedBlock } from './internal'
 
 /**
  * Options for runMultistepTasks.
@@ -62,20 +63,38 @@ export async function runMultistepTasks<TResult>(
   tasks: MultistepTask<TResult>[],
   options?: BatchOptions,
 ): Promise<TResult[]> {
+  // Empty-tasks shortcut runs BEFORE the F2 consumption pipeline — this is
+  // 1.0 behavior (an invalid `batchSize` with zero tasks silently resolves
+  // to `[]` rather than throwing) and must not change; see `runSettled`'s
+  // deliberately different ordering (it validates first) for contrast.
   if (tasks.length === 0) return []
 
-  const maxStep = tasks.reduce((max, task) => (task.maxStep > max ? task.maxStep : max), 0)
-  const batchSize = options?.batchSize ?? 100
-  if (!Number.isInteger(batchSize) || batchSize < 1) {
-    throw new Error(`batchSize must be a positive integer, got ${batchSize}`)
-  }
+  // TOCTOU fix (external review, P1): snapshot the caller-owned array BEFORE
+  // the consumption pipeline runs, and read ONLY this snapshot (`ts`) for
+  // everything from here on — never `tasks` again. Without this, a caller
+  // that mutates `tasks` during the `await resolvePinnedBlock()` gap below
+  // (e.g. `tasks[0] = freshTask` from a microtask) could substitute an
+  // unconsumed task in for one `prepareRun` already marked consumed (that
+  // substitute then executes without ever passing through the guard), while
+  // the original — rightfully consumed — never runs. A `.slice()` up front
+  // makes every subsequent read immune to such a mutation.
+  const ts = tasks.slice()
+
+  // F2 consumption pipeline (validate -> reject-duplicates -> pin-capability
+  // -> mark-consumed), see `src/core/internal.ts`. Only branded tasks
+  // (`defineTask`/`buildErc20Task`/`buildErc4626Task` output) are affected —
+  // legacy `MultistepTask`s pass through every step as a no-op.
+  const batchSize = prepareRun(ts, options)
+  await resolvePinnedBlock()
+
+  const maxStep = ts.reduce((max, task) => (task.maxStep > max ? task.maxStep : max), 0)
 
   for (let step = 1; step <= maxStep; step++) {
     const calls: StepCall[] = []
     const mapping: { taskIndex: number; key: string }[] = []
 
-    for (let taskIndex = 0; taskIndex < tasks.length; taskIndex++) {
-      const task = tasks[taskIndex]!
+    for (let taskIndex = 0; taskIndex < ts.length; taskIndex++) {
+      const task = ts[taskIndex]!
       if (step > task.maxStep) continue
 
       const stepCalls = task.buildStepCalls(step)
@@ -88,7 +107,7 @@ export async function runMultistepTasks<TResult>(
     // Pre-allocate a 2D array indexed by taskIndex for O(1) result grouping.
     // Avoids Map hashing overhead — taskIndex is sequential zero-based, so
     // array indexing is both faster and simpler.
-    const perTaskResults: StepResult[][] = Array.from({ length: tasks.length }, () => [])
+    const perTaskResults: StepResult[][] = Array.from({ length: ts.length }, () => [])
 
     // Only hit the network when there are calls; a step where every active task
     // built nothing still dispatches empty results below (consistent per-step
@@ -134,15 +153,15 @@ export async function runMultistepTasks<TResult>(
 
     // Dispatch to every task active at this step — including those that built no
     // calls — so consumeStepResults is invoked consistently each step.
-    for (let i = 0; i < tasks.length; i++) {
-      const task = tasks[i]
+    for (let i = 0; i < ts.length; i++) {
+      const task = ts[i]
       if (task && step <= task.maxStep) {
         task.consumeStepResults(step, perTaskResults[i]!)
       }
     }
   }
 
-  return tasks.map((task) => task.finalize())
+  return ts.map((task) => task.finalize())
 }
 
 export type { StepExecutor, StepCall, StepResult, RawResult }
