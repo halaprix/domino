@@ -5,3 +5,6 @@ coverage/
 .env
 .DS_Store
 .antigravitycli/
+
+# superpowers scratch (progress ledger)
+.superpowers/
