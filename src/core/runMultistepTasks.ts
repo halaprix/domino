@@ -14,6 +14,7 @@
  */
 
 import type { MultistepTask, StepCall, StepResult, StepExecutor, RawResult, BlockParam } from './types'
+import { prepareRun, resolvePinnedBlock } from './internal'
 
 /**
  * Options for runMultistepTasks.
@@ -62,13 +63,20 @@ export async function runMultistepTasks<TResult>(
   tasks: MultistepTask<TResult>[],
   options?: BatchOptions,
 ): Promise<TResult[]> {
+  // Empty-tasks shortcut runs BEFORE the F2 consumption pipeline — this is
+  // 1.0 behavior (an invalid `batchSize` with zero tasks silently resolves
+  // to `[]` rather than throwing) and must not change; see `runSettled`'s
+  // deliberately different ordering (it validates first) for contrast.
   if (tasks.length === 0) return []
 
+  // F2 consumption pipeline (validate -> reject-duplicates -> pin-capability
+  // -> mark-consumed), see `src/core/internal.ts`. Only branded tasks
+  // (`defineTask`/`buildErc20Task`/`buildErc4626Task` output) are affected —
+  // legacy `MultistepTask`s pass through every step as a no-op.
+  const batchSize = prepareRun(tasks, options)
+  await resolvePinnedBlock()
+
   const maxStep = tasks.reduce((max, task) => (task.maxStep > max ? task.maxStep : max), 0)
-  const batchSize = options?.batchSize ?? 100
-  if (!Number.isInteger(batchSize) || batchSize < 1) {
-    throw new Error(`batchSize must be a positive integer, got ${batchSize}`)
-  }
 
   for (let step = 1; step <= maxStep; step++) {
     const calls: StepCall[] = []

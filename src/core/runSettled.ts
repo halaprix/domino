@@ -40,6 +40,7 @@
 import type { MultistepTask, StepCall, StepResult, StepExecutor, RawResult, Address } from './types'
 import type { BatchOptions } from './runMultistepTasks'
 import { DominoCallError } from './errors'
+import { prepareRun, resolvePinnedBlock } from './internal'
 
 /**
  * Internal-only diagnostics channel (F2). A compiled `defineTask()` output
@@ -99,16 +100,18 @@ export async function runSettled<TResult>(
   tasks: MultistepTask<TResult>[],
   options?: BatchOptions,
 ): Promise<SettledTaskResult<TResult>[]> {
-  // Validation is a programmer error and must throw regardless of whether
-  // there happen to be any tasks — checked BEFORE the empty-tasks shortcut
-  // so `runSettled(executor, [], { batchSize: 0 })` rejects rather than
-  // silently resolving to `[]`.
-  const batchSize = options?.batchSize ?? 100
-  if (!Number.isInteger(batchSize) || batchSize < 1) {
-    throw new Error(`batchSize must be a positive integer, got ${batchSize}`)
-  }
+  // F2 consumption pipeline (validate -> reject-duplicates -> pin-capability
+  // -> mark-consumed), see `src/core/internal.ts`. Validation is a
+  // programmer error and must throw regardless of whether there happen to
+  // be any tasks — checked BEFORE the empty-tasks shortcut so
+  // `runSettled(executor, [], { batchSize: 0 })` rejects rather than
+  // silently resolving to `[]` (unchanged 1.0 ordering — contrast with
+  // `runMultistepTasks`, which checks the empty-tasks shortcut first).
+  const batchSize = prepareRun(tasks, options)
 
   if (tasks.length === 0) return []
+
+  await resolvePinnedBlock()
 
   const maxStep = tasks.reduce((max, task) => (task.maxStep > max ? task.maxStep : max), 0)
 

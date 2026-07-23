@@ -25,6 +25,8 @@ import { makeRef, isRefHandle } from './refs'
 import { DominoCallError as E } from './errors' // alias only shortens THIS file's source; esbuild resolves imports to the shared top-level binding when bundling, so it costs nothing either way
 import { DIAGNOSTICS as DG } from './runSettled'
 import type { TaskDiagnostics, DiagnosticsCarrier } from './runSettled'
+import { SINGLE_USE } from './internal'
+import type { SingleUseCarrier } from './internal'
 
 // ─── Public types ───────────────────────────────────────────────────────────
 
@@ -444,12 +446,13 @@ export function defineTask<const S>(build: (t: TaskBuilder) => S): MultistepTask
     return resolved
   }
 
-  const compiled: MultistepTask<unknown> & DiagnosticsCarrier = {
+  const compiled: MultistepTask<unknown> & DiagnosticsCarrier & SingleUseCarrier = {
     maxStep: maxDep,
     buildStepCalls,
     consumeStepResults,
     finalize,
     [DG]: () => diag,
+    [SINGLE_USE]: true,
   }
 
   return compiled as unknown as MultistepTask<ResolveRefs<S>>
