@@ -597,3 +597,162 @@ describe('defineTask — safety hardening (external review)', () => {
     expect(result).toEqual({ nested: { list: [5n] } })
   })
 })
+
+describe('defineTask — F3: human-readable ABI', () => {
+  it('defines a task with human-readable ABI strings and executes identically to object form', async () => {
+    // Human-readable form
+    const stringAbi = [
+      'function balanceOf(address) view returns (uint256)',
+      'function symbol() view returns (string)',
+    ] as const
+
+    // Equivalent object form (for comparison)
+    const objectAbi = [
+      {
+        type: 'function',
+        name: 'balanceOf',
+        stateMutability: 'view',
+        inputs: [{ name: 'account', type: 'address' }],
+        outputs: [{ type: 'uint256' }],
+      },
+      {
+        type: 'function',
+        name: 'symbol',
+        stateMutability: 'view',
+        inputs: [],
+        outputs: [{ type: 'string' }],
+      },
+    ] as const
+
+    const executor: StepExecutor = {
+      async executeMulticall(calls): Promise<RawResult[]> {
+        return calls.map((c): RawResult => {
+          if (c.functionName === 'balanceOf') {
+            // Verify that the executor receives a parsed Abi object, not strings
+            expect(typeof c.abi[0]).toBe('object')
+            return { status: 'success', value: 100n }
+          }
+          return { status: 'success', value: 'TEST' }
+        })
+      },
+    }
+
+    // Task with human-readable ABI
+    const taskString = defineTask((t) => {
+      const bal = t.call({ target: ADDR, abi: stringAbi, functionName: 'balanceOf', args: [ADDR] })
+      const sym = t.call({ target: ADDR, abi: stringAbi, functionName: 'symbol' })
+      return { bal, sym }
+    })
+
+    // Task with object ABI
+    const taskObject = defineTask((t) => {
+      const bal = t.call({ target: ADDR, abi: objectAbi, functionName: 'balanceOf', args: [ADDR] })
+      const sym = t.call({ target: ADDR, abi: objectAbi, functionName: 'symbol' })
+      return { bal, sym }
+    })
+
+    // Both should execute with the same results
+    const [resultString] = await runMultistepTasks(executor, [taskString])
+    const [resultObject] = await runMultistepTasks(executor, [taskObject])
+
+    expect(resultString).toEqual({ bal: 100n, sym: 'TEST' })
+    expect(resultObject).toEqual({ bal: 100n, sym: 'TEST' })
+    expect(resultString).toEqual(resultObject)
+  })
+
+  it('human-readable ABI with invalid fragment → parseAbiMemoized error propagates at BUILD time (defineTask throws synchronously)', () => {
+    const invalidAbi = ['garbage not a valid abi fragment'] as const
+
+    // Wrap in a function to avoid TypeScript errors on the invalid ABI
+    function buildTask() {
+      return defineTask((t) => {
+        // This should throw synchronously during defineTask execution
+        // because parseAbiMemoized is called in callImpl
+        const bad = t.call({
+          target: ADDR,
+          abi: invalidAbi,
+          functionName: 'someFunc',
+          args: [],
+        })
+        return { bad }
+      })
+    }
+
+    expect(buildTask).toThrow()
+  })
+
+  it('human-readable ABI: executor receives a parsed Abi (objects, not strings)', async () => {
+    const stringAbi = ['function getVal() view returns (uint256)'] as const
+
+    let receivedAbi: unknown
+
+    const executor: StepExecutor = {
+      async executeMulticall(calls): Promise<RawResult[]> {
+        for (const call of calls) {
+          if (call.functionName === 'getVal') {
+            receivedAbi = call.abi
+          }
+        }
+        return calls.map((): RawResult => ({ status: 'success', value: 42n }))
+      },
+    }
+
+    const task = defineTask((t) => {
+      const v = t.call({ target: ADDR, abi: stringAbi, functionName: 'getVal' })
+      return { v }
+    })
+
+    await runMultistepTasks(executor, [task])
+
+    // Verify the executor received an array of objects, not strings
+    expect(Array.isArray(receivedAbi)).toBe(true)
+    expect((receivedAbi as unknown[]).length).toBe(1)
+    expect(typeof (receivedAbi as unknown[])[0]).toBe('object')
+  })
+
+  it('P1.2 fix: mixed array (parsed items + string items) → build-time throw', () => {
+    // Create a mixed array with one parsed item and one string
+    const mixed = [
+      { type: 'function', name: 'symbol', stateMutability: 'view', inputs: [], outputs: [] },
+      'function bar() view returns (uint256)',
+    ] as const
+
+    function buildTaskMixed1() {
+      return defineTask((t) => {
+        const bad = t.call({
+          target: ADDR,
+          // @ts-expect-error mixing types to test validation
+          abi: mixed,
+          functionName: 'symbol',
+          args: [],
+        })
+        return { bad }
+      })
+    }
+
+    expect(buildTaskMixed1).toThrow('abi must be entirely human-readable strings or entirely parsed ABI items, not a mix')
+  })
+
+  it('P1.2 fix: mixed array reverse (string items + parsed items) → build-time throw', () => {
+    // Create a mixed array with string first, then parsed item
+    const mixed = [
+      'function symbol() view returns (string)',
+      { type: 'function', name: 'bar', stateMutability: 'view', inputs: [], outputs: [] },
+    ] as const
+
+    function buildTaskMixed2() {
+      return defineTask((t) => {
+        const bad = t.call({
+          target: ADDR,
+          // @ts-expect-error mixing types to test validation
+          abi: mixed,
+          functionName: 'symbol',
+          args: [],
+        })
+        return { bad }
+      })
+    }
+
+    expect(buildTaskMixed2).toThrow('abi must be entirely human-readable strings or entirely parsed ABI items, not a mix')
+  })
+})

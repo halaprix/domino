@@ -17,11 +17,12 @@
  * depth/resolution/finalize algorithm.
  */
 
-import type { Abi } from 'abitype'
+import type { Abi, ParseAbi } from 'abitype'
 import type { ContractFunctionArgs, ContractFunctionName, ContractFunctionReturnType } from 'viem'
 import type { Address, MultistepTask, StepCall, StepResult } from './types'
 import type { Ref, WithRefs, ResolveRefs, RefHandle } from './refs'
 import { makeRef, isRefHandle } from './refs'
+import { parseAbiMemoized } from './abi'
 import { DominoCallError as E } from './errors' // alias only shortens THIS file's source; esbuild resolves imports to the shared top-level binding when bundling, so it costs nothing either way
 import { DIAGNOSTICS as DG } from './runSettled'
 import type { TaskDiagnostics, DiagnosticsCarrier } from './runSettled'
@@ -29,6 +30,14 @@ import { SINGLE_USE } from './internal'
 import type { SingleUseCarrier } from './internal'
 
 // ─── Public types ───────────────────────────────────────────────────────────
+
+/** Normalize human-readable ABI strings to parsed Abi objects.
+ *  - If `abi` is an array of strings, parse it via abitype → returns `ParseAbi<abi>`
+ *  - Otherwise, pass through the already-parsed Abi as-is.
+ * This ensures type-level parity: inference on string form matches object form. */
+type NormalizedAbi<abi extends Abi | readonly string[]> = abi extends readonly string[]
+  ? ParseAbi<abi>
+  : abi
 
 /** View/pure function names of `abi` — the only functions `t.call` accepts
  *  (F1: the invariant that makes dedup, 1.2, result-preserving).
@@ -68,16 +77,21 @@ type ArgsField<abi extends Abi, fn extends ViewPureFunctionName<abi>> =
  * `optional: true` call's ref can feed a dynamic target; the runtime
  * skip-chain rule handles an actual `undefined` resolution.
  *
- * `abi` is a plain `Abi` today; the field is deliberately typed so a future
- * `readonly string[]` (F3, human-readable ABI) widening is additive, not
- * implemented here.
+ * `abi` accepts both parsed (`Abi`) and human-readable (`readonly string[]`)
+ * forms (F3). Human-readable strings are normalized at build time via
+ * `parseAbiMemoized`, so the compiled `StepCall.abi` is always a parsed Abi.
+ * Type-level inference (return type, arg tuple, view/pure check) is identical
+ * for both forms, via `NormalizedAbi`'s abitype integration.
  *
  * A plain `interface` can't express "`args` is required/optional depending
  * on `abi`/`fn`", so this is a `type` (intersection with `ArgsField`)
  * instead — still used identically at every call site (`TypedCallSpec<abi,
  * fn>`, never `extends`ed).
  */
-export type TypedCallSpec<abi extends Abi, fn extends ViewPureFunctionName<abi>> = {
+export type TypedCallSpec<
+  abi extends Abi | readonly string[],
+  fn extends ViewPureFunctionName<NormalizedAbi<abi>>,
+> = {
   target: Address | Ref<Address | undefined>
   abi: abi
   functionName: fn
@@ -85,14 +99,14 @@ export type TypedCallSpec<abi extends Abi, fn extends ViewPureFunctionName<abi>>
   optional?: boolean
   /** Accepted and stored now; read by dedup (1.2). Default: eligible (`true`). */
   dedupe?: boolean
-} & ArgsField<abi, fn>
+} & ArgsField<NormalizedAbi<abi>, fn>
 
 /** The builder passed into `defineTask`'s callback. */
 export interface TaskBuilder {
-  call<const abi extends Abi, fn extends ViewPureFunctionName<abi>>(
+  call<const abi extends Abi | readonly string[], fn extends ViewPureFunctionName<NormalizedAbi<abi>>>(
     spec: TypedCallSpec<abi, fn> & { readonly optional: true },
-  ): Ref<ContractFunctionReturnType<abi, 'view' | 'pure', fn> | undefined>
-  call<const abi extends Abi, fn extends ViewPureFunctionName<abi>>(
+  ): Ref<ContractFunctionReturnType<NormalizedAbi<abi>, 'view' | 'pure', fn> | undefined>
+  call<const abi extends Abi | readonly string[], fn extends ViewPureFunctionName<NormalizedAbi<abi>>>(
     // `optional?: false` (not bare `TypedCallSpec<abi, fn>`) so a WIDENED
     // `boolean` (e.g. a variable typed `boolean`, not the literal `true`/
     // `false`) matches NEITHER overload — silently falling through to this
@@ -100,7 +114,7 @@ export interface TaskBuilder {
     // value would be wrong; forcing a type error makes the caller narrow
     // (`as const`, a literal, or an `if`) instead.
     spec: TypedCallSpec<abi, fn> & { readonly optional?: false },
-  ): Ref<ContractFunctionReturnType<abi, 'view' | 'pure', fn>>
+  ): Ref<ContractFunctionReturnType<NormalizedAbi<abi>, 'view' | 'pure', fn>>
 
   derive<const I extends readonly Ref<unknown>[], R>(
     inputs: I,
@@ -218,7 +232,7 @@ export function defineTask<const S>(build: (t: TaskBuilder) => S): MultistepTask
 
   function callImpl(spec: {
     target: unknown
-    abi: Abi
+    abi: Abi | readonly string[]
     functionName: string
     args?: readonly unknown[]
     optional?: boolean
@@ -229,9 +243,43 @@ export function defineTask<const S>(build: (t: TaskBuilder) => S): MultistepTask
     for (const x of ar) checkOwn(x)
     const dep = maxDepOf(ar) + 1
     const id = nextId++
+
+    // F3: Normalize human-readable ABI strings at build time.
+    // P1.2 fix: Reject mixed arrays (partial strings, partial objects).
+    // If ANY element is a string, ALL elements must be strings.
+    // Empty array is treated as already-parsed (parseAbi([]) is valid).
+    let normalizedAbi: Abi
+    if (spec.abi.length > 0) {
+      const firstIsString = typeof spec.abi[0] === 'string'
+      // Check for mixed arrays: if first is string, verify all are strings
+      if (firstIsString) {
+        for (let i = 1; i < spec.abi.length; i++) {
+          if (typeof spec.abi[i] !== 'string') {
+            throw new Error(
+              'abi must be entirely human-readable strings or entirely parsed ABI items, not a mix',
+            )
+          }
+        }
+        normalizedAbi = parseAbiMemoized(spec.abi as readonly string[])
+      } else {
+        // First is object; verify no strings present
+        for (let i = 1; i < spec.abi.length; i++) {
+          if (typeof spec.abi[i] === 'string') {
+            throw new Error(
+              'abi must be entirely human-readable strings or entirely parsed ABI items, not a mix',
+            )
+          }
+        }
+        normalizedAbi = spec.abi as Abi
+      }
+    } else {
+      // Empty array: treat as already-parsed
+      normalizedAbi = spec.abi as Abi
+    }
+
     N.set(id, {
       dep,
-      ab: spec.abi,
+      ab: normalizedAbi,
       nm: spec.functionName,
       ar,
       op: !!spec.optional,

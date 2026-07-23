@@ -225,3 +225,97 @@ describe('type-level: safety-hardening findings (external review)', () => {
     })
   })
 })
+
+describe('type-level: F3 — human-readable ABI inference parity', () => {
+  it('string form infers the same Ref<...> as object form (balanceOf example)', () => {
+    // Object form (baseline)
+    defineTask((t: TaskBuilder) => {
+      const bal = t.call({ target: ADDR, abi, functionName: 'balanceOf', args: [ADDR] })
+      expectTypeOf(bal).toEqualTypeOf<Ref<bigint>>()
+      return { bal }
+    })
+
+    // String form (must infer identically)
+    const stringAbi = [
+      'function balanceOf(address account) view returns (uint256)',
+      'function symbol() view returns (string)',
+    ] as const
+
+    defineTask((t: TaskBuilder) => {
+      const bal = t.call({ target: ADDR, abi: stringAbi, functionName: 'balanceOf', args: [ADDR] })
+      expectTypeOf(bal).toEqualTypeOf<Ref<bigint>>()
+      return { bal }
+    })
+  })
+
+  it('string form view/pure constraint: nonpayable function rejected via @ts-expect-error', () => {
+    const stringAbi = [
+      'function transfer(address to, uint256 amount) returns (bool)',
+      'function balanceOf(address account) view returns (uint256)',
+    ] as const
+
+    defineTask((t: TaskBuilder) => {
+      // @ts-expect-error -- 'transfer' is nonpayable, not view|pure, even in string form
+      const bad = t.call({
+        target: ADDR,
+        abi: stringAbi,
+        functionName: 'transfer',
+        args: [ADDR, 1n],
+      })
+      void bad
+
+      // balanceOf is view — this should compile
+      const bal = t.call({ target: ADDR, abi: stringAbi, functionName: 'balanceOf', args: [ADDR] })
+      expectTypeOf(bal).toEqualTypeOf<Ref<bigint>>()
+
+      return { bal }
+    })
+  })
+
+  it('string form arg tuple: wrong arg type rejected', () => {
+    const stringAbi = [
+      'function balanceOf(address account) view returns (uint256)',
+      'function getNum(uint256 x) view returns (uint256)',
+    ] as const
+
+    defineTask((t: TaskBuilder) => {
+      // @ts-expect-error -- balanceOf expects an address, not a bigint (even in string form)
+      const bad = t.call({ target: ADDR, abi: stringAbi, functionName: 'balanceOf', args: [1n] })
+      void bad
+
+      // Correct args for getNum
+      const num = t.call({ target: ADDR, abi: stringAbi, functionName: 'getNum', args: [1n] })
+      expectTypeOf(num).toEqualTypeOf<Ref<bigint>>()
+
+      return { num }
+    })
+  })
+
+  it('string form zero-arg function: args still omittable', () => {
+    const stringAbi = ['function symbol() view returns (string)'] as const
+
+    defineTask((t: TaskBuilder) => {
+      // args is omittable for zero-arg functions in string form too
+      const sym = t.call({ target: ADDR, abi: stringAbi, functionName: 'symbol' })
+      expectTypeOf(sym).toEqualTypeOf<Ref<string>>()
+      return { sym }
+    })
+  })
+
+  it('string form multi-output function: infers tuple correctly', () => {
+    const stringAbi = [
+      'function getReserveData(address asset) view returns (uint128 liquidityIndex, uint128 currentLiquidityRate, uint128 variableBorrowIndex)',
+    ] as const
+
+    defineTask((t: TaskBuilder) => {
+      const data = t.call({
+        target: ADDR,
+        abi: stringAbi,
+        functionName: 'getReserveData',
+        args: [ADDR],
+      })
+      expectTypeOf(data).toEqualTypeOf<Ref<readonly [bigint, bigint, bigint]>>()
+      return { data }
+    })
+  })
+})

@@ -62,6 +62,23 @@
  *   after:  43,268 bytes (42.25KB)  gzip 10,502 bytes (10.26KB)
  *   delta:  +1,363 bytes raw (+1.33KB)  +426 bytes gzip (+0.42KB)
  *
+ * 1.1 (F3 human-readable ABI, T10 + P1 external review): budget raised again,
+ * 43KB → **45.5KB** raw. Feature adds `parseAbiMemoized()` in `src/core/abi.ts`
+ * (WeakMap identity cache + string-key LRU cache, capacity 256) for
+ * deduplicating parsed ABIs across both array-identity and value-equality
+ * boundaries. Integrates `NormalizedAbi<abi>` type helper into
+ * `TaskBuilder.call` overloads and `TypedCallSpec` to accept both `Abi` and
+ * `readonly string[]` forms at build time, normalizing to parsed `Abi` at
+ * runtime before storing on the node. P1 external review adds:
+ * (P1.1) identity-cache stores { abi, key } and refreshes LRU recency on hits
+ * to prevent reference-equality splits; (P1.2) strict validation loop (per-
+ * element check) rejects mixed arrays (strings + objects) at build time. The
+ * validation loop in P1.2 is runtime code (must check all elements) and
+ * necessary for correctness. Measured delta (F3 base + P1 validation):
+ *   before: 43,268 bytes (42.25KB)  gzip 10,502 bytes (10.26KB)
+ *   F3 only: 44,115 bytes (43.08KB)  gzip 10,761 bytes (10.51KB)  [+847 raw, +259 gzip]
+ *   F3+P1: 44,974 bytes (43.92KB)  gzip 10,916 bytes (10.7KB)  [+1,706 raw, +414 gzip]
+ *
  * 1.1 (F2 single-use guard, T9 — external review round): two P2/P1 fixes on
  * top of the above, same 43KB ceiling (net bundle effect negligible):
  * (P1) both `runMultistepTasks` and `runSettled` now snapshot their `tasks`
@@ -89,14 +106,17 @@ function bundleSize(name: string): number {
 }
 
 describe('bundle size', () => {
-  it('main index bundle is under 43KB (core + handlers + viem utils + bytecodes + defineTask + hardening + single-use guard)', () => {
+  it('main index bundle is under 45.5KB (core + handlers + viem utils + bytecodes + defineTask + hardening + single-use guard + F3 human-readable ABI + P1 review fixes)', () => {
     const size = bundleSize('index.js')
     // v2 bundles viem ABI utils (~3KB) + bytecodes (~8KB) + core/handlers (~19KB);
     // 1.1 (F5) adds runSettled (~1KB); 1.1 (F2) adds defineTask (~4.4KB);
     // 1.1 (F2 hardening round) adds ~1KB more; 1.1 (F2 single-use guard, T9)
-    // adds ~1.3KB more (full diagnostics messages, not shortened for bytes)
+    // adds ~1.3KB more (full diagnostics messages, not shortened for bytes);
+    // 1.1 (F3+P1) adds parseAbiMemoized (~0.8KB) + identity-cache recency
+    // tracking + mixed-array validation (~0.9KB) = ~1.7KB total. Measured:
+    // 44,974 bytes (43.92KB) raw, 10,916 bytes (10.7KB) gzip.
     // — see the module doc comment above for the full measured delta.
-    expect(size).toBeLessThan(43 * 1024)
+    expect(size).toBeLessThan(45.5 * 1024)
   })
 
   it('no engine subpaths exist (removed in v2)', () => {
