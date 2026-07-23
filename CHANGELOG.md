@@ -3,6 +3,19 @@
 All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.2.0] — 2026-07-23
+
+### Added
+- `maxConcurrentBatches` (default 1): within-step concurrency pool for physical batch dispatch; completion-order-independent result routing; fail-fast cancellation for `run` (queued batches undispatched, in-flight settle, deterministic error selection when exactly one batch fails); `runSettled` never cancels queued batches.
+- `adaptiveBatching` (default false): bisection of transport-failed batches through the central queue, bounded by `maxBatchAttempts` (default `2·⌈log₂(batchSize)⌉+1`, every execution counts; exhaustion → coarse `kind: 'batch'` failures with `cause` = last transport error, never wrong data); deadlock-free by construction; reverts never retried.
+- `dedupe` (default false): within-step cross-task merge of eligible calls keyed on `(target, calldata, canonical output signature)` with selector-resolved overloads; fan-out of success and failure to all subscribers; only `TypedCallSpec` calls eligible (legacy tasks never affected).
+- `Presets.throughput = { maxConcurrentBatches: 5, adaptiveBatching: true, dedupe: true }` — ready-made preset for portfolio/index workloads.
+- `pinBlock` (default false) + `onPin(pinnedBlock)` + `PinnedBlock` type + optional `StepExecutor.getBlockNumber` (Eip1193Executor implements): resolve one concrete block at run start (+1 RT) and reuse for every step; pending unsupported; explicit blockNumber/blockHash are no-ops; onPin fires exactly once per run.
+
+### Changed
+- Bundle budget is gzip-only (<15KB); current 13.9 KB gzip.
+- Internal: `run`/`runSettled` unified onto one step engine + pool (no observable change at defaults; defaults byte-compatible with 1.1 — pinned by the compat suite).
+
 ## [1.1.0] — 2026-07-23
 
 ### Added
@@ -105,6 +118,7 @@ First public release of `@halaprix/domino`.
 - `position.assets` is `bigint | undefined` — correctly represents the case where `balanceOf` succeeds but `convertToAssets` reverts.
 - CI now runs real `tsc --noEmit` (typecheck); build step runs before tests so `dist/` exists for bundle-size checks on a clean checkout.
 
+[1.2.0]: https://github.com/halaprix/domino/releases/tag/v1.2.0
 [1.1.0]: https://github.com/halaprix/domino/releases/tag/v1.1.0
 [1.0.1]: https://github.com/halaprix/domino/releases/tag/v1.0.1
 [1.0.0]: https://github.com/halaprix/domino/releases/tag/v1.0.0
