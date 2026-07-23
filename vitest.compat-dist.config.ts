@@ -7,12 +7,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   resolve: {
     alias: {
-      "@halaprix/domino": path.resolve(__dirname, "./src/index.ts"),
+      "@halaprix/domino": path.resolve(__dirname, "./dist/index.js"),
     },
   },
   test: {
     globals: true,
     environment: "node",
-    include: ["src/__tests__/**/*.test.ts", "src/__tests__/**/*.test-d.ts"],
+    include: ["src/__tests__/compat/**/*.test.ts"],
   },
 });

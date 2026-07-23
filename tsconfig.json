@@ -4,6 +4,10 @@
     "module": "ESNext",
     "lib": ["ES2022"],
     "moduleResolution": "Bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@halaprix/domino": ["./src/index.ts"]
+    },
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
