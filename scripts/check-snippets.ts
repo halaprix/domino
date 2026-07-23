@@ -18,12 +18,26 @@
  * stays auditable in CI output.
  *
  * Each fence is materialized as its own module file under .snippets-build/
- * so duplicate top-level identifiers across fences never collide, then
- * `tsc --noEmit -p tsconfig.snippets.json` runs over the whole directory.
+ * so duplicate top-level identifiers across fences never collide. Every
+ * generated file is checked with `tsc --noEmit -p tsconfig.snippets.json`,
+ * which:
+ *   - sets `moduleDetection: "force"` so an import/export-less fence is
+ *     still its own isolated module scope rather than a "script" that
+ *     shares globals with every other import/export-less fence in the
+ *     same tsc invocation (that sharing is otherwise a real false-green/
+ *     false-red hazard — see the checkSrcEscapes()/negative-test notes);
+ *   - self-type-checks this script (included in tsconfig.snippets.json)
+ *     on every run.
  *
- * This script also runs the bundle-size badge drift check (gzips
- * dist/index.js and compares against the README badge value) — see
- * `checkBadge()` below.
+ * This script also:
+ *   - scans every materialized file's import specifiers and fails loudly
+ *     if any escapes `.snippets-build/` via a relative `..` segment or
+ *     resolves into the real `src/` tree — the `paths` mapping only
+ *     redirects the `@halaprix/domino` specifier itself, so a snippet
+ *     importing `../../src/index` directly would otherwise silently
+ *     type-check against source instead of the built dist types;
+ *   - runs the bundle-size badge drift check (gzips dist/index.js and
+ *     compares against the README badge value) — see `checkBadge()`.
  *
  * Anvil execution is intentionally NOT implemented — it's called out as
  * optional in spec D4 and out of scope for this harness.
@@ -32,12 +46,14 @@
 import { execFileSync } from 'node:child_process'
 import { gzipSync } from 'node:zlib'
 import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, statSync } from 'node:fs'
-import { join, dirname, basename } from 'node:path'
+import type { Dirent } from 'node:fs'
+import { join, dirname, basename, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..')
 const BUILD_DIR = join(ROOT, '.snippets-build')
+const SRC_DIR = join(ROOT, 'src')
 const SKIP_MARKER = '<!-- snippet: skip -->'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -45,9 +61,9 @@ const SKIP_MARKER = '<!-- snippet: skip -->'
 interface Fence {
   /** 1-based index of this fence among all ts/typescript fences in its source file. */
   index: number
-  /** 1-based line of the opening ``` fence marker. */
+  /** 1-based line of the opening fence marker. */
   startLine: number
-  /** 1-based line of the closing ``` fence marker. */
+  /** 1-based line of the closing fence marker. */
   endLine: number
   content: string
   skipped: boolean
@@ -62,56 +78,90 @@ interface CheckedFile {
 }
 
 // ─── Fence extraction ───────────────────────────────────────────────────────
+//
+// Handles CommonMark backtick fences generically: any run of 3+ backticks
+// opens a fence, and the closing run must be at least as long as the
+// opening one. The language is the *first* whitespace-delimited token of
+// the info string, so ```ts, ````ts (4 backticks), and ```ts title="x"
+// (extra attributes) are all recognized the same way. An info string that
+// merely *looks* like a ts/typescript fence but doesn't parse into a clean
+// first token (e.g. a language glued directly to an attribute with no
+// separating whitespace) fails loudly rather than being silently skipped —
+// unchecked published examples are worse than a noisy CI failure.
 
-/** Extracts all ```ts / ```typescript fences from markdown source, in order. */
-function extractFences(markdown: string): Fence[] {
+const OPEN_RE = /^(`{3,})(.*)$/
+const TS_LOOKALIKE_RE = /^(ts|typescript)(?=$|[\s:{])/i
+
+function extractFences(markdown: string, sourceLabel: string): Fence[] {
   const lines = markdown.split('\n')
   const fences: Fence[] = []
   let index = 0
   let i = 0
 
   while (i < lines.length) {
-    const line = lines[i] ?? ''
-    const openMatch = /^```(\S+)?\s*$/.exec(line.trim())
-    const lang = openMatch?.[1]
+    const trimmed = (lines[i] ?? '').trim()
+    const openMatch = OPEN_RE.exec(trimmed)
 
-    if (openMatch && (lang === 'ts' || lang === 'typescript')) {
-      const startLine = i + 1
+    if (!openMatch) {
+      i++
+      continue
+    }
 
-      // Skip marker: immediately preceding line, allowing exactly one blank line.
-      let skipped = false
-      let skipMarkerLine: number | undefined
-      let j = i - 1
-      if (j >= 0 && (lines[j] ?? '').trim() === '') j -= 1
-      if (j >= 0 && (lines[j] ?? '').trim() === SKIP_MARKER) {
-        skipped = true
-        skipMarkerLine = j + 1
+    const fenceRun = openMatch[1] ?? '```'
+    const infoString = (openMatch[2] ?? '').trim()
+    const firstToken = infoString.split(/\s+/)[0] ?? ''
+    const isTs = firstToken === 'ts' || firstToken === 'typescript'
+    const closeRe = new RegExp(`^\`{${fenceRun.length},}$`)
+
+    if (!isTs) {
+      if (TS_LOOKALIKE_RE.test(infoString)) {
+        throw new Error(
+          `Unsupported fence syntax at ${sourceLabel}:${i + 1} — info string "${infoString}" ` +
+            `looks like a TypeScript fence but its first token isn't cleanly "ts" or "typescript" ` +
+            `(check for a missing space before attributes). Refusing to silently skip it.`,
+        )
       }
-
-      // Find the closing fence.
+      // Not a fence we care about — skip past its body using the SAME
+      // backtick-count rule so an embedded ``` inside a 4+-backtick fence
+      // isn't mistaken for that fence's closing line.
       let k = i + 1
-      const contentLines: string[] = []
-      while (k < lines.length && (lines[k] ?? '').trim() !== '```') {
-        contentLines.push(lines[k] ?? '')
-        k++
-      }
-      const endLine = k + 1 // line of the closing ``` (or EOF if unterminated)
-
-      index += 1
-      fences.push({
-        index,
-        startLine,
-        endLine,
-        content: contentLines.join('\n'),
-        skipped,
-        ...(skipMarkerLine !== undefined ? { skipMarkerLine } : {}),
-      })
-
+      while (k < lines.length && !closeRe.test((lines[k] ?? '').trim())) k++
       i = k + 1
       continue
     }
 
-    i++
+    const startLine = i + 1
+
+    // Skip marker: immediately preceding line, allowing exactly one blank line.
+    let skipped = false
+    let skipMarkerLine: number | undefined
+    let j = i - 1
+    if (j >= 0 && (lines[j] ?? '').trim() === '') j -= 1
+    if (j >= 0 && (lines[j] ?? '').trim() === SKIP_MARKER) {
+      skipped = true
+      skipMarkerLine = j + 1
+    }
+
+    // Find the closing fence (a run of backticks at least as long as the opening).
+    let k = i + 1
+    const contentLines: string[] = []
+    while (k < lines.length && !closeRe.test((lines[k] ?? '').trim())) {
+      contentLines.push(lines[k] ?? '')
+      k++
+    }
+    const endLine = k + 1 // line of the closing fence (or EOF if unterminated)
+
+    index += 1
+    fences.push({
+      index,
+      startLine,
+      endLine,
+      content: contentLines.join('\n'),
+      skipped,
+      ...(skipMarkerLine !== undefined ? { skipMarkerLine } : {}),
+    })
+
+    i = k + 1
   }
 
   return fences
@@ -121,7 +171,7 @@ function extractFences(markdown: string): Fence[] {
 
 /** Non-recursive: lists files directly inside `dir` with the given extension. */
 function listFiles(dir: string, ext: string): string[] {
-  let entries: ReturnType<typeof readdirSync>
+  let entries: Dirent[]
   try {
     entries = readdirSync(dir, { withFileTypes: true })
   } catch {
@@ -189,9 +239,10 @@ function materialize(): { manifest: Manifest[]; checkedFiles: CheckedFile[]; tot
 
   // Fenced blocks extracted from markdown docs.
   for (const mdFile of discoverMarkdownFiles()) {
+    const relMdFile = relPath(mdFile)
     const markdown = readFileSync(mdFile, 'utf8')
-    const fences = extractFences(markdown)
-    checkedFiles.push({ relPath: relPath(mdFile), fences })
+    const fences = extractFences(markdown, relMdFile)
+    checkedFiles.push({ relPath: relMdFile, fences })
 
     const stem = docStem(mdFile)
     for (const fence of fences) {
@@ -203,7 +254,7 @@ function materialize(): { manifest: Manifest[]; checkedFiles: CheckedFile[]; tot
       writeFileSync(dest, fence.content + '\n')
       manifest.push({
         generatedFile: relPath(dest),
-        sourceFile: relPath(mdFile),
+        sourceFile: relMdFile,
         sourceLines: `${fence.startLine}-${fence.endLine}`,
       })
       totalChecked += 1
@@ -211,6 +262,69 @@ function materialize(): { manifest: Manifest[]; checkedFiles: CheckedFile[]; tot
   }
 
   return { manifest, checkedFiles, totalChecked, totalSkipped }
+}
+
+// ─── src/ escape check ──────────────────────────────────────────────────────
+//
+// The tsconfig `paths` mapping only redirects the `@halaprix/domino`
+// specifier to dist/index.d.ts. Nothing stops a snippet from importing
+// e.g. `../../src/index` directly, which would type-check against source
+// (with its stricter tsconfig — a different pass/fail outcome than a real
+// consumer would ever see) instead of the built public surface. Every
+// materialized file's import specifiers are scanned for that.
+
+const IMPORT_SPECIFIER_PATTERNS = [
+  /\bfrom\s+['"]([^'"]+)['"]/g,
+  /^\s*import\s+['"]([^'"]+)['"]/gm,
+  /\bimport\(\s*['"]([^'"]+)['"]\s*\)/g,
+  /\brequire\(\s*['"]([^'"]+)['"]\s*\)/g,
+]
+
+function findImportSpecifiers(content: string): string[] {
+  const specs: string[] = []
+  for (const re of IMPORT_SPECIFIER_PATTERNS) {
+    re.lastIndex = 0
+    let m: RegExpExecArray | null
+    while ((m = re.exec(content))) {
+      if (m[1]) specs.push(m[1])
+    }
+  }
+  return specs
+}
+
+interface SrcEscape {
+  generatedFile: string
+  sourceFile: string
+  sourceLines: string
+  specifier: string
+  reason: string
+}
+
+function findSrcEscapes(manifest: Manifest[]): SrcEscape[] {
+  const escapes: SrcEscape[] = []
+  for (const entry of manifest) {
+    const absGeneratedFile = join(ROOT, entry.generatedFile)
+    const content = readFileSync(absGeneratedFile, 'utf8')
+    for (const spec of findImportSpecifiers(content)) {
+      if (spec.startsWith('.')) {
+        if (spec.split('/').includes('..')) {
+          escapes.push({
+            ...entry,
+            specifier: spec,
+            reason: 'relative import escapes .snippets-build/ via ".."',
+          })
+          continue
+        }
+        const resolved = resolve(dirname(absGeneratedFile), spec)
+        if (resolved === SRC_DIR || resolved.startsWith(SRC_DIR + sep)) {
+          escapes.push({ ...entry, specifier: spec, reason: 'resolves into src/ instead of dist' })
+        }
+      } else if (spec === 'src' || spec.startsWith('src/') || spec.includes('/src/')) {
+        escapes.push({ ...entry, specifier: spec, reason: 'references src/ directly instead of dist' })
+      }
+    }
+  }
+  return escapes
 }
 
 // ─── tsc invocation ─────────────────────────────────────────────────────────
@@ -328,6 +442,19 @@ function main(): void {
     console.log('')
   }
 
+  console.log('── src/ escape check ──')
+  const srcEscapes = findSrcEscapes(manifest)
+  if (srcEscapes.length === 0) {
+    console.log('OK: no snippet imports escape .snippets-build/ or reach into src/.\n')
+  } else {
+    for (const esc of srcEscapes) {
+      console.error(
+        `SRC ESCAPE: ${esc.sourceFile}:${esc.sourceLines} (via ${esc.generatedFile}) imports "${esc.specifier}" — ${esc.reason}`,
+      )
+    }
+    console.log('')
+  }
+
   console.log('Running: tsc --noEmit -p tsconfig.snippets.json ...\n')
   const tsc = runTsc()
   console.log(tsc.output.trim().length > 0 ? tsc.output.trim() : '(no output)')
@@ -338,8 +465,9 @@ function main(): void {
   console.log(badge.message)
   console.log('')
 
-  const ok = tsc.ok && badge.ok
+  const ok = tsc.ok && badge.ok && srcEscapes.length === 0
   if (!ok) {
+    if (srcEscapes.length > 0) console.error('FAIL: one or more snippets import outside the public dist surface.')
     if (!tsc.ok) console.error('FAIL: one or more snippets failed to type-check (see tsc output above).')
     if (!badge.ok) console.error('FAIL: bundle-size badge check failed (see message above).')
     process.exitCode = 1
@@ -349,4 +477,9 @@ function main(): void {
   console.log('OK: all snippets type-check and the bundle-size badge is accurate.')
 }
 
-main()
+try {
+  main()
+} catch (err) {
+  console.error((err as Error).message ?? String(err))
+  process.exitCode = 1
+}

@@ -8,9 +8,10 @@
     "noEmit": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
+    "moduleDetection": "force",
     "paths": {
       "@halaprix/domino": ["./dist/index.d.ts"]
     }
   },
-  "include": [".snippets-build/**/*.ts"]
+  "include": [".snippets-build/**/*.ts", "scripts/check-snippets.ts"]
 }
