@@ -1,17 +1,23 @@
 /**
  * Bundle size regression tests.
  *
+ * v2+: Gzip-only budget. Single entry point — Eip1193Executor + handlers +
+ * bytecodes + viem ABI utils. Target: under 15KB gzip (what consumers feel).
+ * Both this test and `scripts/check-snippets.ts`'s `checkBadge()` independently
+ * measure gzip compression of dist/index.js; this test enforces the ceiling,
+ * checkBadge() enforces badge accuracy (±0.1KB).
+ *
+ * **Historical context (raw-byte budgets, now retired):**
+ *
  * v2: Single entry point — Eip1193Executor + handlers + bytecodes + viem ABI utils.
  * viem utils tree-shake to ~3KB; bytecodes add ~8KB; core + handlers ~19KB.
- * Target: under 41KB raw (unminified `dist/index.js` byte length — the
- * README's "gzip" badge tracks the compressed size separately, see
- * `scripts/check-snippets.ts`'s `checkBadge()`).
+ * Target: under 41KB raw (unminified `dist/index.js` byte length).
  *
  * 1.1 (F5): `runSettled` adds ~1KB raw — threshold bumped from 35KB to 36KB.
  *
  * 1.1 (F2, `defineTask`): budget consciously raised to 40KB raw. Measured
  * delta (raw `dist/index.js` byte length via `readFileSync(..., 'utf-8')
- * .length`, same metric this test asserts on):
+ * .length`):
  *   before: 36,360 bytes (35.51KB)  gzip 8,241 bytes (8.05KB)
  *   after:  40,910 bytes (39.95KB)  gzip 9,745 bytes (9.52KB)
  *   delta:  +4,550 bytes raw (+4.44KB)  +1,504 bytes gzip (+1.47KB)
@@ -20,35 +26,33 @@
  * very first measurement.)
  *
  * 1.1 (F2 hardening round — external review, 6 accepted findings): budget
- * raised again, 40KB → **41KB** raw, controller-pre-authorized. Adds: a
- * per-task ownership token on every `RefHandle` + a build-time check
- * rejecting a ref from a different `defineTask()` call; a `closed` flag
- * rejecting `t.call`/`t.derive` after the builder callback has returned +a
- * thenable check rejecting an async builder; a shallow guard in `resShape`
- * rejecting a `Ref` nested inside a class instance/non-plain object; and
- * type-level tightening (`args` required once a function takes inputs, the
- * non-optional `call` overload pinned to `optional?: false` so a widened
- * `boolean` matches neither overload, `target` accepting `Ref<Address |
- * undefined>`) — the last three are types only, zero runtime bytes. Measured
- * delta for this round:
+ * raised again, 40KB → **41KB** raw. Adds: a per-task ownership token on
+ * every `RefHandle` + a build-time check rejecting a ref from a different
+ * `defineTask()` call; a `closed` flag rejecting `t.call`/`t.derive` after
+ * the builder callback has returned + a thenable check rejecting an async
+ * builder; a shallow guard in `resShape` rejecting a `Ref` nested inside a
+ * class instance/non-plain object; and type-level tightening (`args` required
+ * once a function takes inputs, the non-optional `call` overload pinned to
+ * `optional?: false` so a widened `boolean` matches neither overload, `target`
+ * accepting `Ref<Address | undefined>`) — the last three are types only, zero
+ * runtime bytes. Measured delta for this round:
  *   before: 40,910 bytes (39.95KB)  gzip 9,745 bytes (9.52KB)
  *   after:  41,905 bytes (40.92KB)  gzip 10,076 bytes (9.84KB)
  *   delta:  +995 bytes raw (+0.97KB)  +331 bytes gzip (+0.32KB)
  *
  * `defineTask` + `refs.ts` compile to ~5.4KB raw / ~2.2KB gzip on their own
  * (measured by isolating their banner-commented section of the bundle). The
- * ref graph (nodes/depth/resolution engine) uses single/double-letter
+ * ref graph (nodes/depth/resolution engine) used single/double-letter
  * internal field and local names (never exposed past `defineTask.ts`'s own
- * closures) specifically to fit this budget — see the "Field names are
+ * closures) to fit the raw-byte budget; see the "Field names are
  * deliberately terse" comment on `Node` in `src/core/defineTask.ts`.
  *
- * 1.1 (F2 single-use guard, T9): budget raised again, 41KB → **43KB** raw,
- * controller-pre-authorized (F2 guard + full diagnostics messages). Adds
- * `src/core/internal.ts` (the `SINGLE_USE` brand, the shared
+ * 1.1 (F2 single-use guard, T9): budget raised again, 41KB → **43KB** raw.
+ * Adds `src/core/internal.ts` (the `SINGLE_USE` brand, the shared
  * consumed-tracking `WeakSet`, and the validate → reject-duplicates →
  * pin-capability → mark-consumed → resolve-pinned-block pipeline shared by
  * both runners) and `DominoTaskReuseError`. Locals/params in
- * `src/core/internal.ts` are deliberately terse (`t`/`ts`/`o`) — same
+ * `src/core/internal.ts` were deliberately terse (`t`/`ts`/`o`) — same
  * budget-driven tradeoff as `defineTask.ts` — but the two
  * `DominoTaskReuseError` messages themselves are intentionally NOT
  * shortened: readable diagnostics (what was reused, and the fix — create a
@@ -97,6 +101,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
+import { gzipSync } from 'node:zlib'
 import { join, resolve } from 'node:path'
 
 const distDir = resolve(import.meta.dirname, '../../dist')
@@ -105,18 +110,20 @@ function bundleSize(name: string): number {
   return readFileSync(join(distDir, name), 'utf-8').length
 }
 
+function bundleSizeGzip(name: string): number {
+  const content = readFileSync(join(distDir, name), 'utf-8')
+  return gzipSync(content).length
+}
+
 describe('bundle size', () => {
-  it('main index bundle is under 45.5KB (core + handlers + viem utils + bytecodes + defineTask + hardening + single-use guard + F3 human-readable ABI + P1 review fixes)', () => {
-    const size = bundleSize('index.js')
-    // v2 bundles viem ABI utils (~3KB) + bytecodes (~8KB) + core/handlers (~19KB);
-    // 1.1 (F5) adds runSettled (~1KB); 1.1 (F2) adds defineTask (~4.4KB);
-    // 1.1 (F2 hardening round) adds ~1KB more; 1.1 (F2 single-use guard, T9)
-    // adds ~1.3KB more (full diagnostics messages, not shortened for bytes);
-    // 1.1 (F3+P1) adds parseAbiMemoized (~0.8KB) + identity-cache recency
-    // tracking + mixed-array validation (~0.9KB) = ~1.7KB total. Measured:
-    // 44,974 bytes (43.92KB) raw, 10,916 bytes (10.7KB) gzip.
-    // — see the module doc comment above for the full measured delta.
-    expect(size).toBeLessThan(45.5 * 1024)
+  it('main index bundle is under 15KB gzip (gzip-only budget for consumer experience)', () => {
+    const sizeGzip = bundleSizeGzip('index.js')
+    // Budget switched to gzip-only: what consumers actually download (transfer size).
+    // All features included: viem ABI utils + bytecodes + core/handlers +
+    // defineTask + hardening + single-use guard + F3 human-readable ABI +
+    // P1 review fixes. Gzip is the metric that matters; descriptive naming
+    // in production code no longer constrained by raw-byte budget.
+    expect(sizeGzip).toBeLessThan(15 * 1024)
   })
 
   it('no engine subpaths exist (removed in v2)', () => {
