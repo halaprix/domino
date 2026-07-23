@@ -5,6 +5,7 @@ import {
   parseAbi,
 } from '../core/abi'
 import type { StepExecutor, StepCall, RawResult, BlockParam, Eip1193Provider } from '../core/types'
+import { DominoCallError } from '../core/errors'
 import {
   MULTICALL3_BYTECODE,
   DEPLOYLESS_WRAPPER_BYTECODE,
@@ -216,24 +217,50 @@ export class Eip1193Executor implements StepExecutor {
     }) as { success: boolean; returnData: `0x${string}` }[]
 
     return decoded.map((result, i) => {
+      const call = calls[i]
+      const key = call?.key ?? String(i)
+
       if (!result.success) {
+        // Reverted call — the returnData is the revert payload (selector +
+        // ABI-encoded reason, if any). No cause: there is no underlying JS
+        // exception here, just the raw bytes the contract returned.
         return {
           status: 'failure' as const,
-          error: new Error(`Call ${calls[i]?.key ?? i} reverted`),
+          error: new DominoCallError(`Call ${key} reverted`, {
+            kind: 'revert',
+            data: result.returnData,
+            ...(call?.target !== undefined ? { target: call.target } : {}),
+            ...(call?.functionName !== undefined ? { functionName: call.functionName } : {}),
+            key,
+          }),
         }
       }
       try {
-        const call = calls[i]!
         const value = decodeFunctionResult({
-          abi: call.abi,
-          functionName: call.functionName,
+          abi: call!.abi,
+          functionName: call!.functionName,
           data: result.returnData,
         })
         // Unwrap single-element arrays (matching viem's behavior)
         const unwrapped = Array.isArray(value) && value.length === 1 ? value[0] : value
         return { status: 'success' as const, value: unwrapped }
       } catch (error) {
-        return { status: 'failure' as const, error }
+        // Success at the multicall level (aggregate3 didn't revert), but the
+        // returnData couldn't be decoded against the expected ABI — either
+        // genuinely malformed data, or (very commonly) `0x` from a call to an
+        // address with no code. Distinguishable from `revert`: `data` carries
+        // the bytes that failed to decode, `cause` carries the decode exception.
+        return {
+          status: 'failure' as const,
+          error: new DominoCallError(`Call ${key} returned data that failed to decode`, {
+            kind: 'decode',
+            cause: error,
+            data: result.returnData,
+            ...(call?.target !== undefined ? { target: call.target } : {}),
+            ...(call?.functionName !== undefined ? { functionName: call.functionName } : {}),
+            key,
+          }),
+        }
       }
     })
   }
