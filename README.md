@@ -17,7 +17,7 @@ _|    _|  _|    _|  _|    _|    _|  _|  _|    _|  _|    _|
 
 [![CI](https://github.com/halaprix/domino/actions/workflows/ci.yml/badge.svg)](https://github.com/halaprix/domino/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/@halaprix/domino)](https://www.npmjs.com/package/@halaprix/domino)
-[![bundle size](https://img.shields.io/badge/gzip-1.8%E2%80%932.4KB-brightgreen)](https://www.npmjs.com/package/@halaprix/domino)
+[![bundle size](https://img.shields.io/badge/gzip-7.4KB-brightgreen)](https://www.npmjs.com/package/@halaprix/domino)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5-blue)](https://www.typescriptlang.org/)
 [![MIT License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -32,6 +32,8 @@ npm install @halaprix/domino
 Multicall is great for batched reads. But what about when step 2 needs step 1's results?
 
 Instead of N separate RPC calls per step, domino runs your state machine **as a batch** — one `multicall` per step. You define the steps, it wires them together.
+
+<!-- snippet: skip -->
 
 ```typescript
 import { createPublicClient, http, mainnet } from "viem"
@@ -78,6 +80,8 @@ That's the whole API. Two pages — read the source of [`erc4626.ts`](src/handle
 
 For convenience, domino ships with pre-built task builders:
 
+<!-- snippet: skip -->
+
 ```typescript
 import { buildErc4626Task, resolveErc4626Vault } from "@halaprix/domino"
 
@@ -101,6 +105,8 @@ Same pattern for ERC20, and you can `buildErc4626Task()` / `buildErc20Task()` to
 ## Historical blocks
 
 Query any block with EIP-1898:
+
+<!-- snippet: skip -->
 
 ```typescript
 const oldVault = await resolveErc4626Vault({

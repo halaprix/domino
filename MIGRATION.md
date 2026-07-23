@@ -10,6 +10,8 @@
 
 ## Before (v0.1.0)
 
+<!-- snippet: skip -->
+
 ```typescript
 import { createPublicClient, http, mainnet } from "viem"
 import { createResolver } from "@halaprix/domino/viem"
@@ -22,7 +24,8 @@ const vault = await resolver.resolveErc4626({ vault: "0x...", owner: "0x..." })
 ## After (v1.0.0)
 
 ```typescript
-import { createPublicClient, http, mainnet } from "viem"
+import { createPublicClient, http } from "viem"
+import { mainnet } from "viem/chains"
 import { Eip1193Executor, resolveErc4626Vault } from "@halaprix/domino"
 
 const provider = createPublicClient({ chain: mainnet, transport: http() })
