@@ -54,10 +54,26 @@
  * shortened: readable diagnostics (what was reused, and the fix — create a
  * fresh task per run/entry, factories return a fresh instance) outrank the
  * raw byte count here; the gzip badge is the number that actually matters
- * to consumers, and it moved by well under 1KB. Measured delta:
+ * to consumers, and it moved by well under 1KB. Measured delta (includes the
+ * subsequent external-review round below — P1's per-runner array snapshot
+ * and P2's O(n) `rejectDuplicateInstances` rewrite net out to only a few
+ * dozen bytes either way):
  *   before: 41,905 bytes (40.92KB)  gzip 10,076 bytes (9.84KB)
- *   after:  43,223 bytes (42.21KB)  gzip 10,496 bytes (10.25KB)
- *   delta:  +1,318 bytes raw (+1.29KB)  +420 bytes gzip (+0.41KB)
+ *   after:  43,268 bytes (42.25KB)  gzip 10,502 bytes (10.26KB)
+ *   delta:  +1,363 bytes raw (+1.33KB)  +426 bytes gzip (+0.42KB)
+ *
+ * 1.1 (F2 single-use guard, T9 — external review round): two P2/P1 fixes on
+ * top of the above, same 43KB ceiling (net bundle effect negligible):
+ * (P1) both `runMultistepTasks` and `runSettled` now snapshot their `tasks`
+ * argument (`const ts = tasks.slice()`) BEFORE `prepareRun` runs, and read
+ * only that snapshot from then on — closes a TOCTOU window where a caller
+ * mutating its own `tasks` array during the `await resolvePinnedBlock()` gap
+ * could substitute an unconsumed task in for one already marked consumed.
+ * (P2) `rejectDuplicateInstances` rewritten from an O(n²) `indexOf` scan to
+ * a single O(n) pass with a lazily-allocated `Set` (only allocated once a
+ * branded task is actually seen) — bulk resolvers can submit fully-branded
+ * arrays, where the old scan was a real cost at scale (10k entries ≈ 50M
+ * comparisons).
  *
  * Engine subpaths (viem, ethers-v5, ethers-v6) removed in v2.
  */

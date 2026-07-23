@@ -91,15 +91,26 @@ export function validateOptions(batchSize: number | undefined): number {
  * supported pattern (see the "allows reusing hand-written stateless task"
  * pin in `src/__tests__/compat/legacy-tasks-1.0.test.ts`); auto-rejecting it
  * would be a new restriction on user code this guard was never meant to add.
+ *
+ * One pass, O(n): a `Set<object>` of branded instances seen so far, allocated
+ * lazily on the first branded task (a fully-unbranded submission — the
+ * common case for legacy consumers — never allocates it at all). External
+ * review (P2) flagged the previous `indexOf`-based scan as O(n²) — bulk
+ * resolvers can submit fully-branded arrays, where an O(n²) scan is a real
+ * cost at scale (10k entries ≈ 50M comparisons).
  */
 export function rejectDuplicateInstances<T>(ts: MultistepTask<T>[]): void {
-  for (let i = 0; i < ts.length; i++) {
-    if ((ts[i] as Branded<T>)[SINGLE_USE] && ts.indexOf(ts[i]!, i + 1) !== -1) {
+  let seen: Set<MultistepTask<T>> | undefined
+  for (const t of ts) {
+    if (!(t as Branded<T>)[SINGLE_USE]) continue
+    seen ??= new Set()
+    if (seen.has(t)) {
       throw new DominoTaskReuseError(
         'Same task instance passed twice in one submission: domino tasks are single-run — ' +
           'create a fresh task for each entry',
       )
     }
+    seen.add(t)
   }
 }
 

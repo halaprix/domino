@@ -3,8 +3,8 @@ import { defineTask } from '../core/defineTask'
 import { runMultistepTasks } from '../core/runMultistepTasks'
 import { runSettled } from '../core/runSettled'
 import { DominoTaskReuseError } from '../core/errors'
-import { buildErc20Task, resolveErc20Token } from '../handlers/erc20'
-import { buildErc4626Task } from '../handlers/erc4626'
+import { buildErc20Task, resolveErc20Token, resolveErc20TokensBulk } from '../handlers/erc20'
+import { buildErc4626Task, resolveErc4626Vault, resolveErc4626VaultsBulk } from '../handlers/erc4626'
 import { MulticallResolver } from '../engine/resolver'
 import type { Address, MultistepTask, StepCall, StepExecutor, RawResult } from '../core/types'
 
@@ -151,6 +151,66 @@ describe('single-use guard — built-in factory tasks', () => {
     expect(first.symbol).toBe('USDC')
     expect(second.symbol).toBe('USDC')
   })
+
+  // External review (P2, gap 3): repeated-call coverage previously existed
+  // only for resolveErc20Token — the other three convenience wrappers each
+  // build a fresh (branded) task per call too, and must be pinned the same
+  // way.
+
+  it('resolveErc4626Vault builds a fresh task per call: calling it twice with the same params still works', async () => {
+    const executor: StepExecutor = {
+      async executeMulticall(calls: StepCall[]): Promise<RawResult[]> {
+        return calls.map((c): RawResult => {
+          if (c.functionName === 'symbol') return { status: 'success', value: 'vTOK' }
+          if (c.functionName === 'decimals') return { status: 'success', value: 18 }
+          if (c.functionName === 'asset') return { status: 'success', value: ADDR }
+          return { status: 'success', value: 0n }
+        })
+      },
+    }
+
+    const first = await resolveErc4626Vault({ client: executor, vault: ADDR })
+    const second = await resolveErc4626Vault({ client: executor, vault: ADDR })
+    expect(first.metadata.symbol).toBe('vTOK')
+    expect(second.metadata.symbol).toBe('vTOK')
+  })
+
+  it('resolveErc20TokensBulk builds fresh tasks per call: calling it twice with the same entries still works', async () => {
+    const executor: StepExecutor = {
+      async executeMulticall(calls: StepCall[]): Promise<RawResult[]> {
+        return calls.map((c): RawResult => {
+          if (c.functionName === 'symbol') return { status: 'success', value: 'USDC' }
+          if (c.functionName === 'decimals') return { status: 'success', value: 6 }
+          return { status: 'success', value: 0n }
+        })
+      },
+    }
+
+    const entries = [{ token: ADDR }]
+    const first = await resolveErc20TokensBulk({ client: executor, entries })
+    const second = await resolveErc20TokensBulk({ client: executor, entries })
+    expect(first[0]?.symbol).toBe('USDC')
+    expect(second[0]?.symbol).toBe('USDC')
+  })
+
+  it('resolveErc4626VaultsBulk builds fresh tasks per call: calling it twice with the same entries still works', async () => {
+    const executor: StepExecutor = {
+      async executeMulticall(calls: StepCall[]): Promise<RawResult[]> {
+        return calls.map((c): RawResult => {
+          if (c.functionName === 'symbol') return { status: 'success', value: 'vTOK' }
+          if (c.functionName === 'decimals') return { status: 'success', value: 18 }
+          if (c.functionName === 'asset') return { status: 'success', value: ADDR }
+          return { status: 'success', value: 0n }
+        })
+      },
+    }
+
+    const entries = [{ vault: ADDR }]
+    const first = await resolveErc4626VaultsBulk({ client: executor, entries })
+    const second = await resolveErc4626VaultsBulk({ client: executor, entries })
+    expect(first[0]?.metadata.symbol).toBe('vTOK')
+    expect(second[0]?.metadata.symbol).toBe('vTOK')
+  })
 })
 
 describe('single-use guard — duplicate-instance-in-one-array semantics', () => {
@@ -239,5 +299,86 @@ describe('single-use guard — executor rejection after consumption', () => {
     // The task was marked consumed BEFORE the (failed) executor call — the
     // second attempt must see a reuse error, not another transport error.
     await expect(runMultistepTasks(executor, [task])).rejects.toThrow(DominoTaskReuseError)
+  })
+})
+
+describe('single-use guard — TOCTOU across the pipeline/execution await gap (external review, P1)', () => {
+  const ADDR_B = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' as Address
+
+  // Timing reasoning (why this is a deterministic construction, not a
+  // microtask race): both `runMultistepTasks` and `runSettled` now take
+  // their internal snapshot (`const ts = tasks.slice()`) and run the WHOLE
+  // synchronous `prepareRun` pipeline (validate/reject-duplicates/mark-
+  // consumed) BEFORE their first `await` (`await resolvePinnedBlock()`).
+  // Calling either function executes that synchronous prefix to completion
+  // before it can suspend and hand a pending promise back to the caller —
+  // this is a language guarantee (run-to-completion until the first
+  // suspend point), not a race that could flip under load. So mutating
+  // `tasks[0]` on the very next statement after the call — still fully
+  // synchronous, no `queueMicrotask` needed — deterministically lands AFTER
+  // the snapshot was already taken, every time. Before the P1 fix, the step
+  // loop re-read `tasks[taskIndex]` directly (no snapshot), so this exact
+  // same mutation would have substituted `replacement` in for `original` by
+  // the time the (post-await) step loop ran: `original` would stay
+  // unconsumed forever (never executed) while `replacement` would run
+  // without ever passing through `prepareRun`.
+
+  it('runMultistepTasks: mutating tasks[0] right after the call cannot substitute a fresh task for the one already snapshotted', async () => {
+    const seenTargets: string[] = []
+    const executor: StepExecutor = {
+      async executeMulticall(calls: StepCall[]): Promise<RawResult[]> {
+        for (const c of calls) seenTargets.push(c.target)
+        return calls.map((): RawResult => ({ status: 'success', value: 10n }))
+      },
+    }
+
+    const original = defineTask((t) => t.call({ target: ADDR, abi: testAbi, functionName: 'getNum' }))
+    const replacement = defineTask((t) =>
+      t.call({ target: ADDR_B, abi: testAbi, functionName: 'getNum' }),
+    )
+
+    const tasks = [original]
+    const resultPromise = runMultistepTasks(executor, tasks)
+    tasks[0] = replacement // synchronous mutation — see timing reasoning above
+
+    const [result] = await resultPromise
+    expect(result).toBe(10n)
+    // The ORIGINAL task's call is what the executor actually saw — not the
+    // replacement's.
+    expect(seenTargets).toEqual([ADDR])
+
+    // The original — the one actually run — is now consumed.
+    await expect(runMultistepTasks(executor, [original])).rejects.toThrow(DominoTaskReuseError)
+    // The replacement was substituted into the caller's array but never
+    // reached by the run in progress, so it's still fresh.
+    const [result2] = await runMultistepTasks(executor, [replacement])
+    expect(result2).toBe(10n)
+  })
+
+  it('runSettled: mutating tasks[0] right after the call cannot substitute a fresh task for the one already snapshotted', async () => {
+    const seenTargets: string[] = []
+    const executor: StepExecutor = {
+      async executeMulticall(calls: StepCall[]): Promise<RawResult[]> {
+        for (const c of calls) seenTargets.push(c.target)
+        return calls.map((): RawResult => ({ status: 'success', value: 10n }))
+      },
+    }
+
+    const original = defineTask((t) => t.call({ target: ADDR, abi: testAbi, functionName: 'getNum' }))
+    const replacement = defineTask((t) =>
+      t.call({ target: ADDR_B, abi: testAbi, functionName: 'getNum' }),
+    )
+
+    const tasks = [original]
+    const resultPromise = runSettled(executor, tasks)
+    tasks[0] = replacement // synchronous mutation — see timing reasoning above
+
+    const [settled] = await resultPromise
+    expect(settled).toEqual({ status: 'fulfilled', value: 10n, diagnostics: { optionalFailures: [] } })
+    expect(seenTargets).toEqual([ADDR])
+
+    await expect(runSettled(executor, [original])).rejects.toThrow(DominoTaskReuseError)
+    const [settled2] = await runSettled(executor, [replacement])
+    expect(settled2).toEqual({ status: 'fulfilled', value: 10n, diagnostics: { optionalFailures: [] } })
   })
 })

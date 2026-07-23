@@ -100,6 +100,15 @@ export async function runSettled<TResult>(
   tasks: MultistepTask<TResult>[],
   options?: BatchOptions,
 ): Promise<SettledTaskResult<TResult>[]> {
+  // TOCTOU fix (external review, P1): snapshot the caller-owned array BEFORE
+  // the consumption pipeline runs, and read ONLY this snapshot (`ts`) for
+  // everything from here on — never `tasks` again. See the identical
+  // comment in `runMultistepTasks` for the full attack this closes; the
+  // snapshot must happen before `prepareRun`, not just before the `await`
+  // below, so `prepareRun` itself marks/validates the SAME array every
+  // subsequent read uses.
+  const ts = tasks.slice()
+
   // F2 consumption pipeline (validate -> reject-duplicates -> pin-capability
   // -> mark-consumed), see `src/core/internal.ts`. Validation is a
   // programmer error and must throw regardless of whether there happen to
@@ -107,26 +116,26 @@ export async function runSettled<TResult>(
   // `runSettled(executor, [], { batchSize: 0 })` rejects rather than
   // silently resolving to `[]` (unchanged 1.0 ordering — contrast with
   // `runMultistepTasks`, which checks the empty-tasks shortcut first).
-  const batchSize = prepareRun(tasks, options)
+  const batchSize = prepareRun(ts, options)
 
-  if (tasks.length === 0) return []
+  if (ts.length === 0) return []
 
   await resolvePinnedBlock()
 
-  const maxStep = tasks.reduce((max, task) => (task.maxStep > max ? task.maxStep : max), 0)
+  const maxStep = ts.reduce((max, task) => (task.maxStep > max ? task.maxStep : max), 0)
 
   // Dead-task bookkeeping: once true, no further buildStepCalls/consumeStepResults
   // calls happen for that task index, and finalize() is skipped entirely.
-  const dead: boolean[] = new Array(tasks.length).fill(false)
-  const deadError: unknown[] = new Array(tasks.length)
+  const dead: boolean[] = new Array(ts.length).fill(false)
+  const deadError: unknown[] = new Array(ts.length)
 
   for (let step = 1; step <= maxStep; step++) {
     const calls: StepCall[] = []
     const mapping: { taskIndex: number; key: string }[] = []
 
-    for (let taskIndex = 0; taskIndex < tasks.length; taskIndex++) {
+    for (let taskIndex = 0; taskIndex < ts.length; taskIndex++) {
       if (dead[taskIndex]) continue
-      const task = tasks[taskIndex]!
+      const task = ts[taskIndex]!
       if (step > task.maxStep) continue
 
       let stepCalls: StepCall[]
@@ -144,7 +153,7 @@ export async function runSettled<TResult>(
       }
     }
 
-    const perTaskResults: StepResult[][] = Array.from({ length: tasks.length }, () => [])
+    const perTaskResults: StepResult[][] = Array.from({ length: ts.length }, () => [])
 
     if (calls.length > 0) {
       for (let batchStart = 0; batchStart < calls.length; batchStart += batchSize) {
@@ -203,9 +212,9 @@ export async function runSettled<TResult>(
       }
     }
 
-    for (let i = 0; i < tasks.length; i++) {
+    for (let i = 0; i < ts.length; i++) {
       if (dead[i]) continue
-      const task = tasks[i]
+      const task = ts[i]
       if (task && step <= task.maxStep) {
         try {
           task.consumeStepResults(step, perTaskResults[i]!)
@@ -217,7 +226,7 @@ export async function runSettled<TResult>(
     }
   }
 
-  return tasks.map((task, i): SettledTaskResult<TResult> => {
+  return ts.map((task, i): SettledTaskResult<TResult> => {
     // Read the task's OWN live diagnostics if it carries the channel (defineTask,
     // F2); every legacy MultistepTask lacks [DIAGNOSTICS] and falls back to an
     // empty (freshly allocated, never shared) TaskDiagnostics.
