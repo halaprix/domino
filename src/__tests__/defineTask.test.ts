@@ -709,4 +709,50 @@ describe('defineTask — F3: human-readable ABI', () => {
     expect((receivedAbi as unknown[]).length).toBe(1)
     expect(typeof (receivedAbi as unknown[])[0]).toBe('object')
   })
+
+  it('P1.2 fix: mixed array (parsed items + string items) → build-time throw', () => {
+    // Create a mixed array with one parsed item and one string
+    const mixed = [
+      { type: 'function', name: 'symbol', stateMutability: 'view', inputs: [], outputs: [] },
+      'function bar() view returns (uint256)',
+    ] as const
+
+    function buildTaskMixed1() {
+      return defineTask((t) => {
+        const bad = t.call({
+          target: ADDR,
+          // @ts-expect-error mixing types to test validation
+          abi: mixed,
+          functionName: 'symbol',
+          args: [],
+        })
+        return { bad }
+      })
+    }
+
+    expect(buildTaskMixed1).toThrow('abi must be entirely human-readable strings or entirely parsed ABI items, not a mix')
+  })
+
+  it('P1.2 fix: mixed array reverse (string items + parsed items) → build-time throw', () => {
+    // Create a mixed array with string first, then parsed item
+    const mixed = [
+      'function symbol() view returns (string)',
+      { type: 'function', name: 'bar', stateMutability: 'view', inputs: [], outputs: [] },
+    ] as const
+
+    function buildTaskMixed2() {
+      return defineTask((t) => {
+        const bad = t.call({
+          target: ADDR,
+          // @ts-expect-error mixing types to test validation
+          abi: mixed,
+          functionName: 'symbol',
+          args: [],
+        })
+        return { bad }
+      })
+    }
+
+    expect(buildTaskMixed2).toThrow('abi must be entirely human-readable strings or entirely parsed ABI items, not a mix')
+  })
 })

@@ -245,12 +245,37 @@ export function defineTask<const S>(build: (t: TaskBuilder) => S): MultistepTask
     const id = nextId++
 
     // F3: Normalize human-readable ABI strings at build time.
-    // Check if abi is an array of strings (human-readable form).
+    // P1.2 fix: Reject mixed arrays (partial strings, partial objects).
+    // If ANY element is a string, ALL elements must be strings.
     // Empty array is treated as already-parsed (parseAbi([]) is valid).
-    const normalizedAbi =
-      spec.abi.length > 0 && typeof spec.abi[0] === 'string'
-        ? parseAbiMemoized(spec.abi as readonly string[])
-        : (spec.abi as Abi)
+    let normalizedAbi: Abi
+    if (spec.abi.length > 0) {
+      const firstIsString = typeof spec.abi[0] === 'string'
+      // Check for mixed arrays: if first is string, verify all are strings
+      if (firstIsString) {
+        for (let i = 1; i < spec.abi.length; i++) {
+          if (typeof spec.abi[i] !== 'string') {
+            throw new Error(
+              'abi must be entirely human-readable strings or entirely parsed ABI items, not a mix',
+            )
+          }
+        }
+        normalizedAbi = parseAbiMemoized(spec.abi as readonly string[])
+      } else {
+        // First is object; verify no strings present
+        for (let i = 1; i < spec.abi.length; i++) {
+          if (typeof spec.abi[i] === 'string') {
+            throw new Error(
+              'abi must be entirely human-readable strings or entirely parsed ABI items, not a mix',
+            )
+          }
+        }
+        normalizedAbi = spec.abi as Abi
+      }
+    } else {
+      // Empty array: treat as already-parsed
+      normalizedAbi = spec.abi as Abi
+    }
 
     N.set(id, {
       dep,

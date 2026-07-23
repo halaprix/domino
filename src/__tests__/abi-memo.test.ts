@@ -156,4 +156,41 @@ describe('parseAbiMemoized', () => {
     const r3 = parseAbiMemoized(abi1)
     expect(r1).toBe(r3)
   })
+
+  it('P1 fix: identity-cache hits update LRU recency — repeated identity hits prevent splits', () => {
+    // Create a single array and use it 257 times (to age out other LRU entries)
+    const singleArray = ['function f() view returns (uint256)'] as const
+    const results: Array<ReturnType<typeof parseAbiMemoized>> = []
+
+    // First parse
+    results.push(parseAbiMemoized(singleArray))
+
+    // Repeat the SAME array reference 256 more times
+    // (identity cache should hit every time and refresh LRU recency)
+    for (let i = 0; i < 256; i++) {
+      results.push(parseAbiMemoized(singleArray))
+    }
+
+    // All should be reference-equal (same identity-cached object)
+    for (let i = 1; i < results.length; i++) {
+      expect(results[i]).toBe(results[0])
+    }
+
+    // Fill the LRU with 255 different ABIs
+    const otherAbis: Array<readonly string[]> = []
+    for (let i = 0; i < 255; i++) {
+      const abi = [`function other${i}() view returns (uint256)`] as const
+      otherAbis.push(abi)
+      parseAbiMemoized(abi)
+    }
+
+    // Now present a value-equal but different-identity array
+    // Before P1 fix: this would parse fresh (LRU entry for singleArray aged out)
+    // After P1 fix: this returns the SAME object as before (LRU entry stayed fresh)
+    const newArraySameContent = ['function f() view returns (uint256)'] as const
+    const split = parseAbiMemoized(newArraySameContent)
+
+    // Must be reference-equal to the original (not split)
+    expect(split).toBe(results[0])
+  })
 })
