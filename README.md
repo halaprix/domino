@@ -27,7 +27,7 @@ _|    _|  _|    _|  _|    _|    _|  _|  _|    _|  _|    _|
 npm install @halaprix/domino
 ```
 
-**Requires `viem` as a runtime dependency** (installed automatically). Works with any EIP-1193 provider — viem PublicClient, ethers v6, or window.ethereum.
+**Requires `viem` as a runtime dependency** (installed automatically). Works with any EIP-1193 provider — a viem `PublicClient`, `window.ethereum`, or any object exposing `request({ method, params })`. (ethers users need an EIP-1193 adapter.)
 
 ## But wait — it's just a state machine
 
@@ -132,8 +132,8 @@ const vault = await resolveErc4626Vault({
 // Returns: { metadata: { symbol, decimals, underlyingAsset, ... }, position: { balance, assets } }
 
 // 100 vaults + owner at default batchSize 100:
-//   Step 1: 5 calls/vault = 500 calls = 5 batches
-//   Step 2: 2 calls/vault = 200 calls = 2 batches
+//   Step 1: 6 calls/vault = 600 calls = 6 batches
+//   Step 2: 1 call/vault = 100 calls = 1 batch
 //   Total: 7 round-trips
 const vaultAddrs = Array(100).fill("0x1234567890123456789012345678901234567890") as Address[]
 const vaults = await resolveErc4626VaultsBulk({
@@ -186,7 +186,7 @@ Works with `blockHash`, `blockTag`, or `blockNumber`. Even on chains where Multi
 | `buildErc20Task()` | Build a task definition for ERC20 token reads |
 | `buildErc4626Task()` | Build a task definition for ERC4626 vault reads |
 | `resolveErc20Token()` | One-shot ERC20: `{ symbol, decimals, balance }` |
-| `resolveErc4626Vault()` | One-shot ERC4626: `{ metadata: { symbol, decimals, ... }, position?: { balance, assets } }` |
+| `resolveErc4626Vault()` | One-shot ERC4626: `{ metadata: { symbol, decimals, ... }, position: { balance, assets } \| undefined }` |
 | `BlockParam` | `{ blockNumber } \| { blockTag } \| { blockHash }` (one of three) |
 
 ## Documentation
