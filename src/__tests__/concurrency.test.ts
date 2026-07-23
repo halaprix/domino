@@ -70,54 +70,100 @@ function okExecutor(): StepExecutor {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// 1. Wall-clock — concurrency pool actually parallelizes within a step.
+// 1. Concurrency observation — external review (P2): absolute wall-clock
+// deadlines flake on loaded CI. Primary assertions observe concurrency
+// directly (max in-flight, dispatch order) via an instrumented executor;
+// exactly ONE relative wall-clock sanity check remains, self-calibrated
+// against a same-test serial baseline instead of an absolute deadline.
 // ─────────────────────────────────────────────────────────────────────────
 
-describe('wall-clock concurrency', () => {
-  it('600 calls / bs=100 / conc=5 completes in ~2 sequential-RT (two waves)', async () => {
-    const latencyMs = 50
-    const invocationSizes: number[] = []
-    const executor: StepExecutor = {
-      async executeMulticall(calls: StepCall[]): Promise<RawResult[]> {
-        invocationSizes.push(calls.length)
-        await sleep(latencyMs)
-        return calls.map((): RawResult => ({ status: 'success', value: 1 }))
-      },
-    }
+/** Parses the flat call index back out of a `makeCallsTask` key ('c123' -> 123). */
+function callIndex(key: string): number {
+  return Number(key.slice(1))
+}
 
+/**
+ * Executor that tracks observed in-flight concurrency and the order batches
+ * were CLAIMED (start of `executeMulticall`, before its artificial delay) —
+ * derives each call's original batch index from its flat call index and the
+ * `batchSize` the test is about to use, so it works for any fixture built
+ * from `makeCallsTask`.
+ */
+function makeConcurrencyProbeExecutor(
+  batchSize: number,
+  delayMs: number,
+): { executor: StepExecutor; maxInFlight: () => number; dispatchOrder: number[] } {
+  let inFlight = 0
+  let observedMax = 0
+  const dispatchOrder: number[] = []
+
+  const executor: StepExecutor = {
+    async executeMulticall(calls: StepCall[]): Promise<RawResult[]> {
+      dispatchOrder.push(Math.floor(callIndex(calls[0]!.key) / batchSize))
+      inFlight++
+      observedMax = Math.max(observedMax, inFlight)
+      await sleep(delayMs)
+      inFlight--
+      return calls.map((): RawResult => ({ status: 'success', value: 1 }))
+    },
+  }
+
+  return { executor, maxInFlight: () => observedMax, dispatchOrder }
+}
+
+describe('observed concurrency', () => {
+  it('conc=5: max observed in-flight is 5, batches claimed in ascending index order', async () => {
+    const { executor, maxInFlight, dispatchOrder } = makeConcurrencyProbeExecutor(100, 15)
     const task = makeCallsTask(600)
-    const start = performance.now()
+
     await runMultistepTasks(executor, [task], { batchSize: 100, maxConcurrentBatches: 5 })
-    const elapsed = performance.now() - start
 
-    expect(invocationSizes).toHaveLength(6) // 600 / 100 = 6 physical batches
-    // 6 batches at concurrency 5 -> 2 waves (5 + 1). Generous bounds against
-    // CI jitter: [1.5x, 3.5x] one batch's latency.
-    expect(elapsed).toBeGreaterThanOrEqual(latencyMs * 1.5)
-    expect(elapsed).toBeLessThanOrEqual(latencyMs * 3.5)
-  }, 20_000)
+    expect(maxInFlight()).toBe(5)
+    // 600/100 = 6 batches; the 6th is only claimed once one of the first 5
+    // frees up, so it can only ever be dispatched last — the full order is
+    // deterministic regardless of which of the 5 finishes first.
+    expect(dispatchOrder).toEqual([0, 1, 2, 3, 4, 5])
+  })
 
-  it('600 calls / bs=100 / conc=1 is genuinely sequential (~6 sequential-RT)', async () => {
+  it('conc=1 (default): max observed in-flight is 1, batches claimed strictly in order', async () => {
+    const { executor, maxInFlight, dispatchOrder } = makeConcurrencyProbeExecutor(100, 5)
+    const task = makeCallsTask(600)
+
+    await runMultistepTasks(executor, [task], { batchSize: 100, maxConcurrentBatches: 1 })
+
+    expect(maxInFlight()).toBe(1)
+    expect(dispatchOrder).toEqual([0, 1, 2, 3, 4, 5])
+  })
+
+  it('relative wall-clock sanity: conc=5 is meaningfully faster than conc=1 for the same fixture (self-calibrated, no absolute deadline)', async () => {
     const latencyMs = 50
-    const invocationSizes: number[] = []
-    const executor: StepExecutor = {
-      async executeMulticall(calls: StepCall[]): Promise<RawResult[]> {
-        invocationSizes.push(calls.length)
-        await sleep(latencyMs)
-        return calls.map((): RawResult => ({ status: 'success', value: 1 }))
-      },
+    function makeLatencyExecutor(): StepExecutor {
+      return {
+        async executeMulticall(calls: StepCall[]): Promise<RawResult[]> {
+          await sleep(latencyMs)
+          return calls.map((): RawResult => ({ status: 'success', value: 1 }))
+        },
+      }
     }
 
-    const task = makeCallsTask(600)
-    const start = performance.now()
-    await runMultistepTasks(executor, [task], { batchSize: 100, maxConcurrentBatches: 1 })
-    const elapsed = performance.now() - start
+    const serialStart = performance.now()
+    await runMultistepTasks(makeLatencyExecutor(), [makeCallsTask(600)], {
+      batchSize: 100,
+      maxConcurrentBatches: 1,
+    })
+    const serialElapsed = performance.now() - serialStart
 
-    expect(invocationSizes).toHaveLength(6)
-    // Default (maxConcurrentBatches: 1) must be genuinely sequential: 6
-    // batches back-to-back. Generous bounds: [5x, 8x].
-    expect(elapsed).toBeGreaterThanOrEqual(latencyMs * 5)
-    expect(elapsed).toBeLessThanOrEqual(latencyMs * 8)
+    const parallelStart = performance.now()
+    await runMultistepTasks(makeLatencyExecutor(), [makeCallsTask(600)], {
+      batchSize: 100,
+      maxConcurrentBatches: 5,
+    })
+    const parallelElapsed = performance.now() - parallelStart
+
+    // 6 batches: serial ~6 waves, conc=5 ~2 waves — expect roughly a 3x
+    // speedup. Assert well under that (< 0.6x serial) so ordinary CI jitter
+    // on either measurement can never flip the comparison.
+    expect(parallelElapsed).toBeLessThan(serialElapsed * 0.6)
   }, 20_000)
 })
 
@@ -515,6 +561,47 @@ describe('runBatchPool (direct)', () => {
     if (outcome.outcome === 'completed') {
       expect(outcome.results[0]).toEqual([{ status: 'success', value: 'slow' }])
       expect(outcome.results[1]).toEqual([{ status: 'success', value: 'fast' }])
+    }
+  })
+
+  it('snapshots results at settlement — an executor reusing the SAME array/wrapper objects across batches still routes correctly (P1)', async () => {
+    // Deliberately hostile: one array, one wrapper object, reused and
+    // MUTATED IN PLACE for every batch. `StepExecutor` never promised a
+    // fresh/immutable array per call — without the settlement-time clone in
+    // `runBatchPool`, a later batch's mutation would retroactively corrupt
+    // an earlier batch's already-"settled" entry once every batch shares
+    // the same underlying object.
+    function makeMutatingExecutor(): StepExecutor {
+      const sharedWrapper: { status: 'success'; value: unknown } = { status: 'success', value: undefined }
+      const sharedArray = [sharedWrapper]
+      return {
+        async executeMulticall(calls: StepCall[]): Promise<RawResult[]> {
+          await sleep(Math.random() * 10)
+          sharedWrapper.value = calls[0]!.key
+          return sharedArray
+        },
+      }
+    }
+
+    function makeWellBehavedExecutor(): StepExecutor {
+      return {
+        async executeMulticall(calls: StepCall[]): Promise<RawResult[]> {
+          await sleep(Math.random() * 10)
+          return [{ status: 'success', value: calls[0]!.key }]
+        },
+      }
+    }
+
+    for (const maxConcurrentBatches of [1, 2]) {
+      const wellBehaved = await runMultistepTasks(makeWellBehavedExecutor(), [makeCallsTask(6)], {
+        batchSize: 1,
+        maxConcurrentBatches,
+      })
+      const mutating = await runMultistepTasks(makeMutatingExecutor(), [makeCallsTask(6)], {
+        batchSize: 1,
+        maxConcurrentBatches,
+      })
+      expect(mutating).toEqual(wellBehaved)
     }
   })
 })

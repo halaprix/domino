@@ -70,6 +70,24 @@
  *     inspected — see `runSteps` in `src/core/engine.ts`, which throws
  *     immediately on a `cancelled` outcome instead of routing anything.
  *
+ * **Result snapshot at settlement (external review, P1):** `results[i]` is
+ * written as `batchResults.map((r) => ({ ...r }))` — a shallow clone of the
+ * array AND every wrapper object — not the raw value `execute()` resolved
+ * with. `StepExecutor` never promised its returned array/wrappers are fresh
+ * or immutable; the pre-F6a sequential code converted each batch's raw
+ * results into `StepResult`s synchronously right after that batch's own
+ * `await`, before the next batch's call even started, so an executor that
+ * reused and mutated the same array/wrapper across calls was already legal.
+ * Routing now happens once, after the WHOLE step's pool settles — without
+ * this clone, an executor mutating a reused wrapper for batch N+1 would
+ * retroactively corrupt batch N's already-"settled" result by the time
+ * routing reads `results[]`. The clone runs with no `await` between it and
+ * the `execute()` call that just resolved, so it captures exactly what that
+ * batch's own settlement saw — true for every `maxConcurrentBatches` value,
+ * including the default (1), where this bug would otherwise reproduce
+ * identically to the concurrent case (deferred routing, not concurrency
+ * itself, is what changed the timing).
+ *
  * **`maxConcurrentBatches: 1` is not special-cased.** `workerCount = min(1,
  * batchCount) = 1` naturally yields exactly one worker processing batches
  * strictly in order, one at a time — on rejection there is no other worker
@@ -152,7 +170,24 @@ export async function runBatchPool(
       const batch = batches[batchIndex]!
       try {
         const batchResults = await execute(batch, batchIndex)
-        if (!cancelled) results[batchIndex] = batchResults
+        // Snapshot (array AND each wrapper) at the moment THIS batch's own
+        // await resolves — external review (P1): the `StepExecutor`
+        // contract never promised fresh/immutable arrays or wrappers, and
+        // the pre-F6a sequential code read (converted to `StepResult`) each
+        // batch's results synchronously right after its own await, before
+        // the next batch's call even started — so an executor reusing a
+        // result array/wrapper object across calls (mutating it in place
+        // for the next batch) was legal and safe. Under the pool, a
+        // batch's raw results now sit in `results[]` until the WHOLE
+        // step's pool settles (routing happens after `runBatchPool`
+        // returns) — without a copy here, a later batch's mutation of a
+        // reused array/wrapper would retroactively corrupt an earlier,
+        // already-settled batch's results by the time routing reads them.
+        // Cloning here — synchronously, with no `await` between this line
+        // and the `execute()` that just resolved — restores the exact
+        // same "read at the moment of settlement" semantics for every
+        // `maxConcurrentBatches` value, including the default (1).
+        if (!cancelled) results[batchIndex] = batchResults.map((r): RawResult => ({ ...r }))
       } catch (error) {
         cancelled = true
         terminalErrors.push({ batchIndex, callIndex: 0, error })
