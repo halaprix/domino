@@ -4,6 +4,8 @@
 
 Each engine entry point is a thin wrapper. The library you choose (viem or ethers) is a peer dependency you already have, so it is **not** bundled. Importing one engine excludes the other two.
 
+<!-- snippet: skip -->
+
 ```typescript
 import { createResolver } from "@halaprix/domino/viem";
 // ethers v5/v6 are not pulled in
