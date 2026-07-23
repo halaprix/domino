@@ -49,25 +49,41 @@ type ArgsOf<abi extends Abi, fn extends ViewPureFunctionName<abi>> =
     ? A
     : readonly unknown[]
 
+/** `args` is omittable only for a genuinely zero-arg function; any function
+ *  with at least one input REQUIRES `args` — there's no value to default it
+ *  to, and silently calling with the wrong arity would be a footgun. */
+type ArgsField<abi extends Abi, fn extends ViewPureFunctionName<abi>> =
+  ArgsOf<abi, fn> extends readonly []
+    ? { args?: WithRefs<ArgsOf<abi, fn>> }
+    : { args: WithRefs<ArgsOf<abi, fn>> }
+
 /**
  * Typed spec for a single `t.call`. `target`/`args` positions accept either
  * a plain value or a `Ref` to a value produced earlier in the same task
  * (`WithRefs`) — this is what makes dynamic targets and dependent args work.
+ * `target` additionally accepts `Ref<Address | undefined>` (not just
+ * `Ref<Address>`) for the same reason `WithRefs` does at arg positions — an
+ * `optional: true` call's ref can feed a dynamic target; the runtime
+ * skip-chain rule handles an actual `undefined` resolution.
  *
  * `abi` is a plain `Abi` today; the field is deliberately typed so a future
  * `readonly string[]` (F3, human-readable ABI) widening is additive, not
  * implemented here.
+ *
+ * A plain `interface` can't express "`args` is required/optional depending
+ * on `abi`/`fn`", so this is a `type` (intersection with `ArgsField`)
+ * instead — still used identically at every call site (`TypedCallSpec<abi,
+ * fn>`, never `extends`ed).
  */
-export interface TypedCallSpec<abi extends Abi, fn extends ViewPureFunctionName<abi>> {
-  target: Address | Ref<Address>
+export type TypedCallSpec<abi extends Abi, fn extends ViewPureFunctionName<abi>> = {
+  target: Address | Ref<Address | undefined>
   abi: abi
   functionName: fn
-  args?: WithRefs<ArgsOf<abi, fn>>
   /** `true` → the returned ref is `Ref<Return | undefined>`; see the module doc. */
   optional?: boolean
   /** Accepted and stored now; read by dedup (1.2). Default: eligible (`true`). */
   dedupe?: boolean
-}
+} & ArgsField<abi, fn>
 
 /** The builder passed into `defineTask`'s callback. */
 export interface TaskBuilder {
@@ -75,7 +91,13 @@ export interface TaskBuilder {
     spec: TypedCallSpec<abi, fn> & { readonly optional: true },
   ): Ref<ContractFunctionReturnType<abi, 'view' | 'pure', fn> | undefined>
   call<const abi extends Abi, fn extends ViewPureFunctionName<abi>>(
-    spec: TypedCallSpec<abi, fn>,
+    // `optional?: false` (not bare `TypedCallSpec<abi, fn>`) so a WIDENED
+    // `boolean` (e.g. a variable typed `boolean`, not the literal `true`/
+    // `false`) matches NEITHER overload — silently falling through to this
+    // one and typing as plain `Ref<Return>` regardless of the actual runtime
+    // value would be wrong; forcing a type error makes the caller narrow
+    // (`as const`, a literal, or an `if`) instead.
+    spec: TypedCallSpec<abi, fn> & { readonly optional?: false },
   ): Ref<ContractFunctionReturnType<abi, 'view' | 'pure', fn>>
 
   derive<const I extends readonly Ref<unknown>[], R>(
@@ -148,8 +170,21 @@ export function defineTask<const S>(build: (t: TaskBuilder) => S): MultistepTask
   const N = new Map<number, Node>()
   const diag: TaskDiagnostics = { optionalFailures: [] }
 
+  // This task instance's private ownership token (identity-only — never
+  // read for any value beyond `===`). Stamped on every ref this task mints;
+  // checked (see `checkOwn`) on every ref this task is ASKED to use, so a
+  // ref from a different `defineTask()` call — whose node ids restart at 0
+  // and would otherwise silently alias (or 'unreachable'-crash against) this
+  // task's own graph — is rejected loudly instead, at build time.
+  const myToken: object = {}
+
   let nextId = 0
   let maxDep = 0
+  // Flips true the instant `build(builder)` returns (see below); every
+  // t.call/t.derive after that point — a retained `t` invoked later, or an
+  // async builder's post-`await` continuation — is rejected loudly instead
+  // of silently corrupting a graph whose depth/step assignment already ran.
+  let closed = false
 
   const depOf = (v: unknown): number => (isRefHandle(v) ? (N.get(v.id)?.dep ?? 0) : 0)
   const maxDepOf = (xs: readonly unknown[]): number =>
@@ -161,6 +196,24 @@ export function defineTask<const S>(build: (t: TaskBuilder) => S): MultistepTask
   const tgt = (n: Node): { target?: Address } =>
     typeof n.ar?.[0] === 'string' ? { target: n.ar[0] as Address } : {}
 
+  function assertOpen(): void {
+    if (closed) {
+      throw new Error(
+        'defineTask builder is closed — t.call/t.derive must be invoked synchronously inside the callback',
+      )
+    }
+  }
+
+  /** Every ref reaching `callImpl`/`deriveImpl` (via target/args/inputs)
+   *  must belong to THIS task's graph — checked once, up front, before
+   *  depth computation ever runs, so `depOf` can simply trust every ref it
+   *  sees belongs to `N`. */
+  function checkOwn(v: unknown): void {
+    if (isRefHandle(v) && v.own !== myToken) {
+      throw new Error('Ref belongs to a different defineTask')
+    }
+  }
+
   function callImpl(spec: {
     target: unknown
     abi: Abi
@@ -169,7 +222,9 @@ export function defineTask<const S>(build: (t: TaskBuilder) => S): MultistepTask
     optional?: boolean
     dedupe?: boolean
   }): Ref<unknown> {
+    assertOpen()
     const ar = [spec.target, ...(spec.args ?? [])]
+    for (const x of ar) checkOwn(x)
     const dep = maxDepOf(ar) + 1
     const id = nextId++
     N.set(id, {
@@ -181,24 +236,30 @@ export function defineTask<const S>(build: (t: TaskBuilder) => S): MultistepTask
       dd: spec.dedupe !== false,
     })
     if (dep > maxDep) maxDep = dep
-    return makeRef(id)
+    return makeRef(id, myToken)
   }
 
   function deriveImpl(
     inputs: readonly Ref<unknown>[],
     fn: (...values: unknown[]) => unknown,
   ): Ref<unknown> {
+    assertOpen()
     // No transform needed: every Ref<unknown> IS already a RefHandle at
     // runtime (makeRef's own return value, just reinterpreted here) — a type
     // cast, not a `.map()`, since there's nothing to actually convert.
     const ins = inputs as unknown as readonly RefHandle[]
+    for (const h of ins) checkOwn(h)
     const id = nextId++
     N.set(id, { dep: maxDepOf(ins), fn, ins })
-    return makeRef(id)
+    return makeRef(id, myToken)
   }
 
   const builder = { call: callImpl, derive: deriveImpl } as unknown as TaskBuilder
   const shape = build(builder)
+  closed = true
+  if (typeof (shape as { then?: unknown } | null)?.then === 'function') {
+    throw new Error('defineTask builder callback must be synchronous (got a Promise)')
+  }
 
   // ---- resolution engine (lazy: derives compute on first demand, memoized) ----
 
@@ -353,6 +414,22 @@ export function defineTask<const S>(build: (t: TaskBuilder) => S): MultistepTask
       const out: Record<string, unknown> = {}
       for (const k of Object.keys(v)) out[k] = resShape(v[k], fails)
       return out
+    }
+    // Fallthrough: primitives, functions, and non-plain objects (class
+    // instances, Map, Date, ...) pass through untouched — deep resolution
+    // only ever descends into plain objects/arrays/tuples (see ResolveRefs'
+    // doc comment). A Ref sitting at such an object's own top level would
+    // otherwise silently stay unresolved (wrong data, not a crash), so that
+    // ONE case is caught here: a shallow scan of `v`'s own enumerable
+    // property values, throwing loudly instead of guessing.
+    if (v !== null && typeof v === 'object') {
+      for (const k of Object.keys(v)) {
+        if (isRefHandle((v as Record<string, unknown>)[k])) {
+          throw new Error(
+            'Refs inside class instances/non-plain objects are not supported in the returned shape — use plain objects/arrays',
+          )
+        }
+      }
     }
     return v
   }

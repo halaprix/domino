@@ -183,3 +183,45 @@ describe('type-level: TaskBuilder.call return inference from ABI', () => {
     })
   })
 })
+
+describe('type-level: safety-hardening findings (external review)', () => {
+  it('args is required once the function has at least one input; still omittable for zero-arg functions', () => {
+    defineTask((t: TaskBuilder) => {
+      // @ts-expect-error -- balanceOf takes an address; args cannot be omitted
+      const bad = t.call({ target: ADDR, abi, functionName: 'balanceOf' })
+      void bad
+
+      // zero-arg function: args stays omittable.
+      const sym = t.call({ target: ADDR, abi, functionName: 'symbol' })
+      expectTypeOf(sym).toEqualTypeOf<Ref<string>>()
+
+      return { sym }
+    })
+  })
+
+  it('a widened `boolean` optional flag matches neither overload (must be narrowed to a literal true/false)', () => {
+    defineTask((t: TaskBuilder) => {
+      // `as boolean` (not `const o: boolean = true`) is deliberate: TS's control-flow
+      // analysis narrows a never-reassigned `const` back to the literal `true` at each
+      // read regardless of its declared annotation, which would defeat this test.
+      const o = true as boolean
+      // @ts-expect-error -- `optional: boolean` (genuinely widened, not a literal) matches
+      // neither the `optional: true` nor the `optional?: false` overload
+      const bad = t.call({ target: ADDR, abi, functionName: 'balanceOf', args: [ADDR], optional: o })
+      void bad
+      return {}
+    })
+  })
+
+  it('target accepts an optional call\'s Ref<Address | undefined>, not just Ref<Address>', () => {
+    defineTask((t: TaskBuilder) => {
+      const maybeOwner = t.call({ target: ADDR, abi, functionName: 'owner', optional: true })
+      expectTypeOf(maybeOwner).toEqualTypeOf<Ref<Address | undefined>>()
+
+      // dynamic target from an OPTIONAL ref (Ref<Address | undefined>) — must compile;
+      // the runtime skip-chain rule handles an actual undefined resolution.
+      const dyn = t.call({ target: maybeOwner, abi, functionName: 'symbol' })
+      return { dyn }
+    })
+  })
+})

@@ -485,3 +485,115 @@ describe('defineTask — mixed legacy + defineTask batching', () => {
     expect(newResult).toEqual({ a: 'new-ok' })
   })
 })
+
+describe('defineTask — safety hardening (external review)', () => {
+  it('a ref from one defineTask used as another defineTask\'s call arg throws synchronously at build time', () => {
+    let foreignRef: unknown
+    defineTask((t) => {
+      foreignRef = t.call({ target: ADDR, abi: testAbi, functionName: 'getAddr' })
+      return {}
+    })
+
+    expect(() =>
+      defineTask((t) => {
+        const b = t.call({
+          target: ADDR,
+          abi: testAbi,
+          functionName: 'getNum',
+          args: [foreignRef as any],
+        })
+        return { b }
+      }),
+    ).toThrow('Ref belongs to a different defineTask')
+  })
+
+  it('a ref from one defineTask used as another defineTask\'s derive input throws synchronously at build time', () => {
+    let foreignRef: unknown
+    defineTask((t) => {
+      foreignRef = t.call({ target: ADDR, abi: testAbi, functionName: 'getAddr' })
+      return {}
+    })
+
+    expect(() =>
+      defineTask((t) => {
+        const d = t.derive([foreignRef as any], (v) => v)
+        return { d }
+      }),
+    ).toThrow('Ref belongs to a different defineTask')
+  })
+
+  it('a ref from one defineTask used as another defineTask\'s dynamic target throws synchronously at build time', () => {
+    let foreignRef: unknown
+    defineTask((t) => {
+      foreignRef = t.call({ target: ADDR, abi: testAbi, functionName: 'getAddr' })
+      return {}
+    })
+
+    expect(() =>
+      defineTask((t) => {
+        const b = t.call({
+          target: foreignRef as any,
+          abi: testAbi,
+          functionName: 'getStr',
+        })
+        return { b }
+      }),
+    ).toThrow('Ref belongs to a different defineTask')
+  })
+
+  it('a retained builder `t` used after defineTask() has already returned throws (builder is closed)', () => {
+    let capturedT: Parameters<Parameters<typeof defineTask>[0]>[0] | undefined
+    defineTask((t) => {
+      capturedT = t
+      return {}
+    })
+
+    expect(capturedT).toBeDefined()
+    expect(() =>
+      capturedT!.call({ target: ADDR, abi: testAbi, functionName: 'getStr' }),
+    ).toThrow('defineTask builder is closed')
+  })
+
+  it('an async build callback throws synchronously (a returned Promise is rejected as unsupported)', () => {
+    expect(() => defineTask(async () => ({ a: 1 }))).toThrow(
+      'defineTask builder callback must be synchronous',
+    )
+  })
+
+  it('a Ref nested inside a class instance in the returned shape throws at finalize (deep exotic nesting unsupported)', async () => {
+    class Box {
+      constructor(public value: unknown) {}
+    }
+
+    const executor: StepExecutor = {
+      async executeMulticall(calls): Promise<RawResult[]> {
+        return calls.map((): RawResult => ({ status: 'success', value: 5n }))
+      },
+    }
+
+    const task = defineTask((t) => {
+      const a = t.call({ target: ADDR, abi: testAbi, functionName: 'getNum', args: [1n] })
+      return { box: new Box(a) }
+    })
+
+    await expect(runMultistepTasks(executor, [task])).rejects.toThrow(
+      'Refs inside class instances/non-plain objects are not supported',
+    )
+  })
+
+  it('a Ref NOT nested inside any non-plain object still resolves fine (control case: plain objects/arrays unaffected)', async () => {
+    const executor: StepExecutor = {
+      async executeMulticall(calls): Promise<RawResult[]> {
+        return calls.map((): RawResult => ({ status: 'success', value: 5n }))
+      },
+    }
+
+    const task = defineTask((t) => {
+      const a = t.call({ target: ADDR, abi: testAbi, functionName: 'getNum', args: [1n] })
+      return { nested: { list: [a] } }
+    })
+
+    const [result] = await runMultistepTasks(executor, [task])
+    expect(result).toEqual({ nested: { list: [5n] } })
+  })
+})

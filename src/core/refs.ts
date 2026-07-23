@@ -32,15 +32,20 @@ const REF_MARKER = Symbol('domino.ref')
  *  marker symbol. `id` is the node's creation-order index in its owning
  *  task's graph (also used, as-is, for "first by creation order" ordering
  *  in `defineTask.ts`'s finalize traversal — no separate ordering table
- *  needed). */
+ *  needed). `own` is the owning `defineTask()` call's private token object
+ *  (identity-only, never read for any value) — since `id`s restart at 0 per
+ *  task, a bare `id` can't distinguish "my node 0" from "some OTHER task's
+ *  node 0"; `defineTask.ts` checks `own === myToken` at build time before
+ *  ever trusting an incoming ref's `id` against its own graph. */
 export interface RefHandle {
   readonly [REF_MARKER]: true
   readonly id: number
+  readonly own: object
 }
 
-/** Mint a new `Ref<T>` wrapping internal node `id`. `defineTask.ts`-only. */
-export function makeRef<T>(id: number): Ref<T> {
-  const handle: RefHandle = { [REF_MARKER]: true, id }
+/** Mint a new `Ref<T>` wrapping internal node `id`, owned by `own`. `defineTask.ts`-only. */
+export function makeRef<T>(id: number, own: object): Ref<T> {
+  const handle: RefHandle = { [REF_MARKER]: true, id, own }
   return handle as unknown as Ref<T>
 }
 
@@ -77,6 +82,17 @@ export type WithRefs<T extends readonly unknown[]> = {
  * Maps the shape returned by `defineTask`'s builder callback: every `Ref<T>`
  * leaf resolves to `T`, recursively through plain objects, arrays, and
  * tuples. Non-ref values (including literal types) pass through unchanged.
+ *
+ * **Limitation:** this type does not (and at runtime, `defineTask`'s
+ * `finalize()` does not either) resolve a `Ref` nested inside a class
+ * instance or other non-plain object (`new Box(ref)`, a `Map`, etc.) — those
+ * pass through structurally untouched by the runtime's shallow safety check,
+ * which only catches a `Ref` sitting at that object's own top-level
+ * enumerable properties (throwing there rather than silently returning an
+ * unresolved ref). A `Ref` nested two or more levels deep inside such an
+ * object (e.g. `new Box({ inner: ref })`) is NOT detected and is the
+ * consumer's own responsibility to avoid — return refs through plain
+ * objects/arrays/tuples instead.
  */
 export type ResolveRefs<S> = S extends Ref<infer T>
   ? T
