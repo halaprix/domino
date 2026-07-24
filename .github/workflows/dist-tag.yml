@@ -1,0 +1,17 @@
+name: Set npm dist-tag
+
+# Temporary maintenance workflow: points the `latest` dist-tag at 1.3.0
+# (today's republish chain landed 1.2.0's PUT last). Removed after use.
+on: workflow_dispatch
+
+jobs:
+  dist-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+      - run: npm dist-tag add @halaprix/domino@1.3.0 latest
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
