@@ -1,163 +1,335 @@
-<!DOCTYPE html>
-<html class="dark" lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>domino — sequential on-chain reads</title>
-  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=JetBrains+Mono:wght@100..900&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
-  <style>
-    .code-container {
-      background-color: #16161e;
-      border: 1px solid #26262e;
-    }
-    .glow-hover:hover {
-      box-shadow: 0 0 20px rgba(99, 102, 241, 0.4);
-    }
-    .feature-card {
-      background: linear-gradient(180deg, #1c1c24 0%, #16161e 100%);
-      border: 1px solid #26262e;
-    }
-    body {
-      background-color: #0a0a0f;
-    }
-  </style>
-</head>
-<body class="bg-[#0a0a0f] text-[#dce3f0] font-[Geist] antialiased overflow-x-hidden min-h-screen flex flex-col">
-  <!-- TopNavBar -->
-  <nav class="fixed top-0 inset-x-0 z-50 flex justify-between items-center px-6 max-w-6xl mx-auto h-16 bg-[#0d141d] border-b border-[#464554] transition-all duration-200 ease-in-out">
-    <div class="font-bold text-2xl text-[#dce3f0] tracking-tight">domino</div>
-    <div class="hidden md:flex gap-6 items-center">
-      <a class="text-[#c7c4d7] hover:text-[#c0c1ff] transition-colors text-base" href="https://github.com/halaprix/domino#readme">Docs</a>
-      <a class="text-[#c7c4d7] hover:text-[#c0c1ff] transition-colors text-base" href="https://github.com/halaprix/domino/blob/main/docs/api-reference.md">API Reference</a>
-      <a class="text-[#c7c4d7] hover:text-[#c0c1ff] transition-colors text-base" href="https://github.com/halaprix/domino/blob/main/docs/benchmarks.md">Benchmarks</a>
-      <a class="text-[#c7c4d7] hover:text-[#c0c1ff] transition-colors text-base" href="https://github.com/halaprix/domino">GitHub</a>
-      <span class="ml-4 text-xs font-semibold bg-[#c0c1ff]/10 text-[#c0c1ff] px-2 py-1 rounded tracking-wide">v1.3.0</span>
-    </div>
-  </nav>
-  <main class="flex-grow pt-32 pb-20 px-6 max-w-6xl mx-auto w-full">
-    <!-- Hero Section -->
-    <section class="text-center max-w-4xl mx-auto mb-20">
-      <div class="inline-flex items-center gap-2 mb-4 px-3 py-1 rounded-full border border-[#c0c1ff]/20 bg-[#c0c1ff]/5 text-[#c0c1ff] text-xs font-semibold tracking-wide">
-        <span class="material-symbols-outlined text-base">bolt</span> Batched on-chain reads
-      </div>
-      <h1 class="text-4xl md:text-5xl mb-6 text-white font-bold tracking-tight">
-        Batched on-chain reads.<br />
-        <span class="text-transparent bg-clip-text bg-gradient-to-r from-[#c0c1ff] to-[#494bd6]">Without the compromise.</span>
-      </h1>
-      <p class="text-lg text-[#c7c4d7] mb-8 max-w-2xl mx-auto">
-        domino solves the N×M RPC problem. Sequential, self-triggering on-chain reads — resolved in M multicalls, not N×M individual calls.
-      </p>
-      <div class="flex flex-col sm:flex-row gap-4 justify-center items-center">
-        <a class="px-6 py-3 bg-[#494bd6] text-white rounded font-semibold glow-hover transition-all hover:bg-[#494bd6]/90" href="https://github.com/halaprix/domino#readme">Get Started</a>
-        <a class="px-6 py-3 border border-[#464554] hover:border-[#c0c1ff] hover:text-[#c0c1ff] text-[#c7c4d7] rounded font-semibold transition-all" href="https://github.com/halaprix/domino#api-at-a-glance">View API</a>
-      </div>
-    </section>
-    <!-- Stats Bar -->
-    <section class="mb-20">
-      <div class="flex flex-wrap justify-center gap-4 md:gap-12 py-6 border-y border-[#464554]/50">
-        <div class="flex items-center gap-2 text-xs font-semibold text-[#c7c4d7] tracking-wide">
-          <span class="material-symbols-outlined text-[#c0c1ff]">data_object</span> 16.8 KB gzipped
-        </div>
-        <div class="flex items-center gap-2 text-xs font-semibold text-[#c7c4d7] tracking-wide">
-          <span class="material-symbols-outlined text-[#c0c1ff]">framework_agnostic</span> Any EIP-1193 provider
-        </div>
-        <div class="flex items-center gap-2 text-xs font-semibold text-[#c7c4d7] tracking-wide">
-          <span class="material-symbols-outlined text-[#c0c1ff]">extension</span> Multichain support
-        </div>
-        <div class="flex items-center gap-2 text-xs font-semibold text-[#c7c4d7] tracking-wide">
-          <span class="material-symbols-outlined text-[#c0c1ff]">gavel</span> MIT License
-        </div>
-      </div>
-    </section>
-    <!-- Comparison Section -->
-    <section class="mb-20">
-      <h2 class="text-3xl font-bold text-white mb-6 text-center">Stop making N×M calls</h2>
-      <div class="grid md:grid-cols-2 gap-6">
-        <!-- The Problem -->
-        <div class="code-container rounded px-6 py-6 relative group">
-          <div class="absolute top-0 left-0 w-full px-6 py-3 border-b border-[#464554]/50 flex justify-between items-center bg-[#2e353f]/20">
-            <span class="text-xs font-semibold text-[#ffb4ab] flex items-center gap-2 tracking-wide"><span class="material-symbols-outlined text-base">close</span> THE PROBLEM</span>
-          </div>
-          <pre class="pt-10 font-[JetBrains_Mono] text-sm overflow-x-auto text-[#c7c4d7]"><span style="color:#494bd6">for</span> (<span style="color:#c0c1ff">const</span> vault <span style="color:#494bd6">of</span> vaults) {
-  <span style="color:#908fa0">// Call 1: get user's vault shares</span>
-  <span style="color:#c0c1ff">const</span> shares = <span style="color:#494bd6">await</span> vault.balanceOf(user);
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>domino — sequential on-chain reads</title>
+    <meta
+      name="description"
+      content="domino solves the N×M RPC problem. Sequential, self-triggering on-chain reads resolved in M multicalls with an FSM executor for Multicall3."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
 
-  <span style="color:#908fa0">// Call 2: convert to assets (depends on Call 1)</span>
-  <span style="color:#c0c1ff">const</span> assets = <span style="color:#494bd6">await</span> vault.convertToAssets(shares);
+    <header class="rail">
+      <a class="rail__mark" href="#main">domino</a>
+      <nav class="rail__nav" aria-label="Sections">
+        <a class="rail__link" href="#topology">Topology</a>
+        <a class="rail__link" href="#workflow">Workflow</a>
+        <a class="rail__link" href="#capabilities">Capabilities</a>
+        <a class="rail__link" href="#benchmarks">Benchmarks</a>
+        <a class="rail__link" href="#setup">Setup</a>
+      </nav>
+      <span class="rail__meta">v1.3.0</span>
+    </header>
 
-  <span style="color:#908fa0">// Result: N×M RPC calls (slow)</span>
-}</pre>
-        </div>
-        <!-- The Solution -->
-        <div class="code-container rounded px-6 py-6 relative group border-[#c0c1ff]/30 shadow-[0_0_15px_rgba(99,102,241,0.1)]">
-          <div class="absolute top-0 left-0 w-full px-6 py-3 border-b border-[#464554]/50 flex justify-between items-center bg-[#2e353f]/20">
-            <span class="text-xs font-semibold text-[#7dd3fc] flex items-center gap-2 tracking-wide"><span class="material-symbols-outlined text-base">check</span> THE SOLUTION</span>
+    <main id="main">
+      <section class="hero">
+        <div class="hero__inner">
+          <div class="hero__copy">
+            <p class="eyebrow">FSM Multicall Executor · EIP-1193 Native</p>
+            <h1 class="hero__title">
+              Batched on-chain reads<span class="hero__stop">.</span>
+            </h1>
+            <p class="hero__lede">
+              domino solves the N×M RPC problem. Define step dependencies directly — step 2 takes step 1's
+              output, and domino resolves the entire task graph in M multicalls instead of N×M individual calls.
+            </p>
+            <div class="hero__actions">
+              <a class="btn btn--live" href="#setup">Install domino</a>
+              <a class="btn" href="https://github.com/halaprix/domino#readme">Read Documentation</a>
+            </div>
           </div>
-          <pre class="pt-10 font-[JetBrains_Mono] text-sm overflow-x-auto text-[#c7c4d7]"><span style="color:#908fa0">// M multicalls — results from step 1 flow to step 2</span>
-<span style="color:#c0c1ff">const</span> executor = <span style="color:#494bd6">new</span> Eip1193Executor(provider);
-<span style="color:#c0c1ff">const</span> results = <span style="color:#494bd6">await</span> runMultistepTasks(executor, [
-  defineTask((t) => {
-    <span style="color:#c0c1ff">const</span> balance = t.call({...});
-    <span style="color:#c0c1ff">const</span> assets = t.call({ args: [balance] });
-    <span style="color:#494bd6">return</span> { balance, assets };
-  })
-]);</pre>
-        </div>
-      </div>
-    </section>
-    <!-- Features Grid -->
-    <section class="mb-20">
-      <div class="grid md:grid-cols-3 gap-6">
-        <div class="feature-card rounded p-6 hover:border-[#c0c1ff]/50 transition-colors">
-          <div class="w-10 h-10 rounded bg-[#c0c1ff]/10 flex items-center justify-center mb-4 text-[#c0c1ff]">
-            <span class="material-symbols-outlined">account_tree</span>
-          </div>
-          <h3 class="text-lg font-bold text-white mb-2">FSM executor</h3>
-          <p class="text-[#c7c4d7]">Results from step N flow automatically into step N+1. Build complex read pipelines.</p>
-        </div>
-        <div class="feature-card rounded p-6 hover:border-[#c0c1ff]/50 transition-colors">
-          <div class="w-10 h-10 rounded bg-[#c0c1ff]/10 flex items-center justify-center mb-4 text-[#c0c1ff]">
-            <span class="material-symbols-outlined">hub</span>
-          </div>
-          <h3 class="text-lg font-bold text-white mb-2">Framework agnostic</h3>
-          <p class="text-[#c7c4d7]">Works with any EIP-1193 provider: viem, window.ethereum, or ethers with an adapter.</p>
-        </div>
-        <div class="feature-card rounded p-6 hover:border-[#c0c1ff]/50 transition-colors">
-          <div class="w-10 h-10 rounded bg-[#c0c1ff]/10 flex items-center justify-center mb-4 text-[#c0c1ff]">
-            <span class="material-symbols-outlined">language</span>
-          </div>
-          <h3 class="text-lg font-bold text-white mb-2">Multichain ready</h3>
-          <p class="text-[#c7c4d7]">MultichainResolver runs the same task graph across chains in parallel.</p>
-        </div>
-      </div>
-    </section>
-    <!-- Quick Start -->
-    <section class="mb-20 max-w-3xl mx-auto">
-      <h2 class="text-3xl font-bold text-white mb-4">Quick Start</h2>
-      <div class="code-container rounded px-6 py-6 relative group">
-        <pre class="font-[JetBrains_Mono] text-sm overflow-x-auto text-[#c7c4d7]"><span style="color:#494bd6">import</span> { createPublicClient, http } <span style="color:#494bd6">from</span> <span style="color:#c0c1ff">"viem"</span>
-<span style="color:#494bd6">import</span> { Eip1193Executor, resolveErc4626Vault } <span style="color:#494bd6">from</span> <span style="color:#c0c1ff">"@halaprix/domino"</span>
 
-<span style="color:#c0c1ff">const</span> provider = createPublicClient({ transport: http() });
-<span style="color:#c0c1ff">const</span> executor = <span style="color:#494bd6">new</span> Eip1193Executor(provider);
+          <figure class="chain">
+            <svg
+              class="chain__svg"
+              viewBox="0 0 460 442"
+              role="img"
+              aria-labelledby="chainTitle chainDesc"
+            >
+              <title id="chainTitle">Execution graph flow in Multicall3</title>
+              <desc id="chainDesc">
+                A task graph enters domino's Eip1193Executor. Step 1 reads balanceOf, step 2 passes that result
+                into convertToAssets, and a derive step calculates final position without extra RPC calls.
+              </desc>
 
-<span style="color:#c0c1ff">const</span> vault = <span style="color:#494bd6">await</span> resolveErc4626Vault({
-  executor,
-  vault: <span style="color:#c0c1ff">"0x..."</span>,
-  owner: <span style="color:#c0c1ff">"0x..."</span>,
-});</pre>
+              <g class="wires">
+                <path class="wire" style="--d: 0.35s" d="M230 50 V92" pathLength="1" />
+                <path class="wire" style="--d: 0.95s" d="M230 136 V150" pathLength="1" />
+                <path class="wire wire--spent" style="--d: 1.15s" d="M230 150 H74 V160 M74 176 V186" pathLength="1" />
+                <path class="wire wire--idle" d="M230 150 H386 V186" pathLength="1" />
+                <path class="wire" style="--d: 2.5s" d="M230 150 V186" pathLength="1" />
+                <path class="wire" style="--d: 3.2s" d="M230 220 V256" pathLength="1" />
+                <path class="wire" style="--d: 4.5s" d="M230 300 V324" pathLength="1" />
+                <path class="wire" style="--d: 5.5s" d="M230 368 V392" pathLength="1" />
+              </g>
+
+              <g class="node" style="--d: 0.1s">
+                <rect class="chip" x="118" y="6" width="224" height="44" rx="10" />
+                <text class="chip__label" x="230" y="33">TASK GRAPH · vaultPosition()</text>
+              </g>
+
+              <g class="node" style="--d: 0.6s">
+                <rect class="chip" x="118" y="92" width="224" height="44" rx="10" />
+                <text class="chip__label" x="230" y="119">EIP1193 EXECUTOR</text>
+              </g>
+
+              <g class="node node--open" style="--d: 1.4s">
+                <rect class="chip" x="8" y="186" width="132" height="34" rx="9" />
+                <text class="chip__label" x="74" y="208">N×M RPC</text>
+              </g>
+
+              <g class="mark">
+                <circle class="brk__pin" cx="74" cy="160" r="2.5" />
+                <circle class="brk__pin" cx="74" cy="176" r="2.5" />
+                <path class="brk" d="M74 160 L89 171" />
+                <text class="flag" x="74" y="238">eliminated</text>
+              </g>
+
+              <g class="node" style="--d: 2.8s">
+                <rect class="chip" x="164" y="186" width="132" height="34" rx="9" />
+                <text class="chip__label" x="230" y="208">multicall #1</text>
+              </g>
+
+              <g class="node node--idle">
+                <rect class="chip" x="320" y="186" width="132" height="34" rx="9" />
+                <text class="chip__label" x="386" y="208">multicall #2</text>
+                <text class="flag flag--idle" x="386" y="238">step 2</text>
+              </g>
+
+              <g class="node" style="--d: 3.5s">
+                <rect class="chip" x="118" y="256" width="224" height="44" rx="10" />
+                <text class="chip__label" x="196" y="283">STEP 1: balanceOf</text>
+                <circle class="pip" cx="294" cy="278" r="4" style="--d: 3.8s" />
+                <circle class="pip" cx="312" cy="278" r="4" style="--d: 4.0s" />
+              </g>
+
+              <g class="node" style="--d: 4.8s">
+                <rect class="chip" x="118" y="324" width="224" height="44" rx="10" />
+                <text class="chip__label" x="200" y="351">STEP 2: convertToAssets</text>
+                <circle class="pip" cx="294" cy="346" r="4" style="--d: 5.0s" />
+                <circle class="pip" cx="312" cy="346" r="4" style="--d: 5.2s" />
+              </g>
+
+              <g class="node node--hold" style="--d: 5.8s">
+                <rect class="chip chip--hold" x="118" y="392" width="224" height="42" rx="10" />
+                <text class="chip__label" x="230" y="418">DERIVED RESULT GRAPH</text>
+              </g>
+            </svg>
+
+            <figcaption class="log">
+              <p class="log__row" style="--d: 0.4s">
+                <span class="log__k">defineTask</span><span class="log__v">single-use graph built</span>
+              </p>
+              <p class="log__row log__row--warn" style="--d: 1.9s">
+                <span class="log__k">naive sequential loop</span><span class="log__v">N×M calls bypassed</span>
+              </p>
+              <p class="log__row" style="--d: 2.5s">
+                <span class="log__k">multicall #1</span><span class="log__v">balanceOf(owner)</span>
+              </p>
+              <p class="log__row" style="--d: 3.6s">
+                <span class="log__k">multicall #2</span><span class="log__v">convertToAssets(ref)</span>
+              </p>
+              <p class="log__row" style="--d: 4.9s">
+                <span class="log__k">t.derive()</span><span class="log__v">local calculation</span>
+              </p>
+              <p class="log__row log__row--warn" style="--d: 5.9s">
+                <span class="log__k">resolved in 2 multicalls</span><span class="log__v">16.8 KB gzipped</span>
+              </p>
+            </figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="band" id="topology">
+        <p class="band__label">Topology</p>
+        <div class="band__body">
+          <h2 class="band__title">One graph, M multicalls</h2>
+          <p class="band__lede">
+            Multicall is great for batched reads. But when step 2 depends on step 1, naive code makes N×M calls.
+            domino's FSM engine automatically computes graph depth and executes one multicall per step batch.
+          </p>
+          <dl class="defs">
+            <div class="def">
+              <dt class="def__k">fsm execution</dt>
+              <dd class="def__v">Results from step N flow automatically into step N+1 parameters via typed Ref&lt;T&gt; handles.</dd>
+            </div>
+            <div class="def">
+              <dt class="def__k">eip-1193 native</dt>
+              <dd class="def__v">Direct integration with viem PublicClient, window.ethereum, or ethers adapters — zero extra protocol layer.</dd>
+            </div>
+            <div class="def">
+              <dt class="def__k">multichain parallel</dt>
+              <dd class="def__v">MultichainResolver executes identical task graphs across multiple EVM chains in parallel.</dd>
+            </div>
+          </dl>
+        </div>
+      </section>
+
+      <section class="band" id="workflow">
+        <p class="band__label">Procedure</p>
+        <div class="band__body">
+          <h2 class="band__title">Workflow</h2>
+          <p class="band__lede">
+            Four simple steps to replace N×M RPC loops with self-triggering multicalls.
+          </p>
+          <ol class="steps">
+            <li class="step">
+              <span class="step__n">01</span>
+              <code class="step__cmd">npm install @halaprix/domino viem</code>
+              <span class="step__text">
+                Install domino and viem. Works with Node.js 18+ and modern browser environments.
+              </span>
+            </li>
+            <li class="step">
+              <span class="step__n">02</span>
+              <code class="step__cmd">const executor = new Eip1193Executor(provider);</code>
+              <span class="step__text">
+                Wrap any EIP-1193 provider (viem PublicClient, window.ethereum, or an ethers adapter).
+              </span>
+            </li>
+            <li class="step">
+              <span class="step__n">03</span>
+              <code class="step__cmd">const position = defineTask((t) =&gt; { ... });</code>
+              <span class="step__text">
+                Describe call dependencies using human-readable ABIs or standard JSON ABIs. Pass result refs directly to subsequent call args.
+              </span>
+            </li>
+            <li class="step">
+              <span class="step__n">04</span>
+              <code class="step__cmd">const [result] = await runMultistepTasks(executor, [position()]);</code>
+              <span class="step__text">
+                Execute the task graph. domino runs minimum required multicalls and returns a fully typed result object.
+              </span>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="band" id="capabilities">
+        <p class="band__label">Guarantees</p>
+        <div class="band__body">
+          <h2 class="band__title">Capabilities &amp; Contracts</h2>
+          <p class="band__lede">
+            domino is engineered for strict production guarantees and zero runtime bloat.
+          </p>
+          <table class="codes">
+            <caption class="codes__caption">Engine guarantees and safety invariants</caption>
+            <thead>
+              <tr>
+                <th scope="col">Guarantee</th>
+                <th scope="col">Metric</th>
+                <th scope="col">Meaning</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row"><span class="dot dot--ok" aria-hidden="true"></span>gzip transfer budget</th>
+                <td class="codes__num">16.8 KB</td>
+                <td>Strict bundle ceiling enforced in CI — whole library including Multicall3 bytecodes and viem utils.</td>
+              </tr>
+              <tr>
+                <th scope="row"><span class="dot dot--ok" aria-hidden="true"></span>single-use task protection</th>
+                <td class="codes__num">Guaranteed</td>
+                <td>Tasks are single-run; re-submitting an existing task instance throws DominoTaskReuseError to prevent race conditions.</td>
+              </tr>
+              <tr>
+                <th scope="row"><span class="dot dot--ok" aria-hidden="true"></span>memoized abi parser</th>
+                <td class="codes__num">LRU 256</td>
+                <td>Deduplicates human-readable ABI parsing across array-identity and value-equality boundaries.</td>
+              </tr>
+              <tr>
+                <th scope="row"><span class="dot dot--ok" aria-hidden="true"></span>per-task isolation</th>
+                <td class="codes__num">runSettled</td>
+                <td>Isolate task failures with runSettled / resolver.runSettled without aborting the entire batch.</td>
+              </tr>
+              <tr>
+                <th scope="row"><span class="dot dot--ok" aria-hidden="true"></span>typescript inference</th>
+                <td class="codes__num">Strict</td>
+                <td>Return types inferred directly from human-readable ABIs and t.derive callbacks.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="band" id="benchmarks">
+        <p class="band__label">Performance</p>
+        <div class="band__body">
+          <h2 class="band__title">N×M Calls vs. Domino M Multicalls</h2>
+          <p class="band__lede">
+            By collapsing dependent calls into M sequential multicalls, domino dramatically reduces RPC roundtrips and latency.
+          </p>
+          <ul class="rows">
+            <li class="row">
+              <span class="row__tag">problem</span>
+              <span class="row__text">
+                Querying 100 vaults with a 2-step pipeline (`balanceOf` → `convertToAssets`) requires 200 sequential HTTP/WebSocket RPC roundtrips.
+              </span>
+            </li>
+            <li class="row">
+              <span class="row__tag">solution</span>
+              <span class="row__text">
+                domino groups step 1 across all 100 vaults into Multicall #1, feeds all 100 balance outputs into Multicall #2, completing the pipeline in 2 multicalls.
+              </span>
+            </li>
+            <li class="row">
+              <span class="row__tag">erc4626 resolver</span>
+              <span class="row__text">
+                Built-in helper `resolveErc4626Vault({ executor, vault, owner })` resolves vault balances, total assets, share prices, and user positions in 2 multicalls.
+              </span>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="band band--last" id="setup">
+        <p class="band__label">Install</p>
+        <div class="band__body">
+          <h2 class="band__title">Setup &amp; Quick Start</h2>
+          <p class="band__lede">
+            Version 1.3.0 is available on npm. Lightweight, fully typed, and zero external runtime configuration.
+          </p>
+          <div class="term" role="group" aria-label="Quick Start Code">
+            <p class="term__line"><span class="term__p">$</span> npm install @halaprix/domino viem</p>
+            <p class="term__line term__line--note"># define a multistep task graph with domino</p>
+            <p class="term__line">import { createPublicClient, http } from "viem";</p>
+            <p class="term__line">import { Eip1193Executor, defineTask, runMultistepTasks } from "@halaprix/domino";</p>
+            <p class="term__line"></p>
+            <p class="term__line">const provider = createPublicClient({ transport: http() });</p>
+            <p class="term__line">const executor = new Eip1193Executor(provider);</p>
+            <p class="term__line"></p>
+            <p class="term__line">function vaultPosition(vault, owner) {</p>
+            <p class="term__line">  return defineTask((t) => {</p>
+            <p class="term__line">    const balance = t.call({ target: vault, abi: vaultAbi, functionName: "balanceOf", args: [owner] });</p>
+            <p class="term__line">    const assets = t.call({ target: vault, abi: vaultAbi, functionName: "convertToAssets", args: [balance] });</p>
+            <p class="term__line">    const hasBalance = t.derive([balance], (bal) => bal > 0n);</p>
+            <p class="term__line">    return { balance, assets, hasBalance };</p>
+            <p class="term__line">  });</p>
+            <p class="term__line">}</p>
+            <p class="term__line"></p>
+            <p class="term__line">const [res] = await runMultistepTasks(executor, [vaultPosition(vaultAddr, ownerAddr)]);</p>
+          </div>
+          <p class="band__note">
+            Supports viem, window.ethereum, ethers v5/v6 (via EIP-1193 adapter), and custom RPC transport wrappers.
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <span class="foot__mark">domino</span>
+      <span class="foot__meta">v1.3.0 · MIT License</span>
+      <div class="foot__links">
+        <a class="foot__link" href="https://github.com/halaprix/domino">GitHub</a>
+        <a class="foot__link" href="https://www.npmjs.com/package/@halaprix/domino">npm</a>
+        <a class="foot__link" href="https://github.com/halaprix/domino/blob/main/CHANGELOG.md">Changelog</a>
+        <a class="foot__link" href="https://github.com/halaprix/domino/issues">Issues</a>
       </div>
-    </section>
-  </main>
-  <!-- Footer -->
-  <footer class="w-full py-10 px-6 max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4 bg-[#080f17] border-t border-[#464554] mt-auto">
-    <div class="text-xs font-semibold text-[#c7c4d7] tracking-wide">© 2026 domino by halaprix. Licensed under MIT.</div>
-    <div class="flex gap-6 text-xs font-semibold">
-      <a class="text-[#c7c4d7] hover:text-[#c0c1ff] transition-colors tracking-wide" href="https://github.com/halaprix/domino/blob/main/CHANGELOG.md">Changelog</a>
-      <a class="text-[#c7c4d7] hover:text-[#c0c1ff] transition-colors tracking-wide" href="https://www.npmjs.com/package/@halaprix/domino">npm</a>
-      <a class="text-[#c7c4d7] hover:text-[#c0c1ff] transition-colors tracking-wide" href="https://github.com/halaprix/domino/issues">Issues</a>
-    </div>
-  </footer>
-</body>
+    </footer>
+  </body>
 </html>
